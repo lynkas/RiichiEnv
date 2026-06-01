@@ -361,6 +361,39 @@ impl WinResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct YakuEntry {
+    pub id: u32,
+    pub name: String,
+    pub name_en: String,
+    pub fan: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HoraDetail {
+    pub actor: u8,
+    pub target: u8,
+    pub is_tsumo: bool,
+    pub is_oya: bool,
+    pub han: u32,
+    pub fu: u32,
+    pub yakuman: bool,
+    pub yakus: Vec<YakuEntry>,
+    pub ron_agari: u32,
+    pub tsumo_agari_oya: u32,
+    pub tsumo_agari_ko: u32,
+    pub base_score: u32,
+    pub honba_bonus: u32,
+    pub riichi_stick_bonus: u32,
+    pub score: u32,
+    pub hand: Vec<String>,
+    pub melds: Vec<Vec<String>>,
+    pub winning_tile: String,
+    pub dora_indicators: Vec<String>,
+    pub ura_indicators: Vec<String>,
+    pub winner_riichi: bool,
+}
+
 pub fn is_terminal_tile(t: u8) -> bool {
     let t_type = t / 4;
     let rank = t_type % 9;

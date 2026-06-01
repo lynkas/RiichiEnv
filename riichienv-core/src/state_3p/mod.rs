@@ -25,6 +25,20 @@ use wall::WallState3P;
 const NP: usize = 3;
 
 #[derive(Debug, Clone)]
+pub struct HoraSnapshot {
+    pub hand: Vec<u8>,
+    pub melds: Vec<Meld>,
+    pub drawn_tile: Option<u8>,
+    pub last_discard: Option<(u8, u8)>,
+    pub riichi_declared: bool,
+    pub oya: u8,
+    pub dora_indicators: Vec<u8>,
+    pub ura_indicator_tiles: [u8; 5],
+    pub win_honba_bonus: u32,
+    pub win_riichi_stick_bonus: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct GameState3P {
     pub wall: WallState3P,
     pub players: [PlayerState3P; NP],
@@ -56,6 +70,9 @@ pub struct GameState3P {
 
     pub win_results: HashMap<u8, WinResult>,
     pub last_win_results: HashMap<u8, WinResult>,
+    pub last_hora_snapshots: HashMap<u8, HoraSnapshot>,
+    pub win_honba_bonus: HashMap<u8, u32>,
+    pub win_riichi_stick_bonus: HashMap<u8, u32>,
     pub round_end_scores: Option<Vec<i32>>,
 
     pub mjai_log: Vec<String>,
@@ -117,6 +134,9 @@ impl GameState3P {
             drawn_tile: None,
             win_results: HashMap::new(),
             last_win_results: HashMap::new(),
+            last_hora_snapshots: HashMap::new(),
+            win_honba_bonus: HashMap::new(),
+            win_riichi_stick_bonus: HashMap::new(),
             round_end_scores: None,
             mjai_log: Vec::new(),
             player_event_counts: [0; NP],
@@ -784,8 +804,12 @@ impl GameState3P {
                             }
 
                             total_win += (self.riichi_sticks * 1000) as i32;
+                            let rsb = (self.riichi_sticks * 1000) as u32;
                             self.riichi_sticks = 0;
                             deltas[pid as usize] += total_win;
+
+                            self.win_honba_bonus.insert(pid, self.honba as u32 * 200);
+                            self.win_riichi_stick_bonus.insert(pid, rsb);
 
                             self.players[pid as usize].score_delta = deltas[pid as usize];
                             for (i, p) in self.players.iter_mut().enumerate() {
@@ -807,6 +831,9 @@ impl GameState3P {
                                 ev.insert("type".to_string(), Value::String("hora".to_string()));
                                 ev.insert("actor".to_string(), Value::Number(pid.into()));
                                 ev.insert("target".to_string(), Value::Number(pid.into()));
+                                if let Some(dt) = self.drawn_tile {
+                                    ev.insert("pai".to_string(), Value::String(crate::parser::tid_to_mjai(dt)));
+                                }
                                 ev.insert(
                                     "deltas".to_string(),
                                     serde_json::to_value(deltas).expect("valid JSON"),
@@ -823,6 +850,7 @@ impl GameState3P {
                                 self._push_mjai_event(Value::Object(ev));
                             }
 
+                            self.save_hora_snapshot(pid);
                             self._initialize_next_round(pid == self.oya, false);
                         } else {
                             self.current_player = (self.current_player + 1) % NP as u8;
@@ -1026,6 +1054,8 @@ impl GameState3P {
                             let stick_pts = (self.riichi_sticks * 1000) as i32;
                             total_deltas[w_pid as usize] += stick_pts;
                             this_deltas[w_pid as usize] += stick_pts;
+                            self.win_honba_bonus.insert(w_pid, ron_honba * 100 * 2);
+                            self.win_riichi_stick_bonus.insert(w_pid, stick_pts as u32);
                             self.riichi_sticks = 0;
                             deposit_taken = true;
                         }
@@ -1048,6 +1078,9 @@ impl GameState3P {
                             ev.insert("type".to_string(), Value::String("hora".to_string()));
                             ev.insert("actor".to_string(), Value::Number(w_pid.into()));
                             ev.insert("target".to_string(), Value::Number(target_pid.into()));
+                            if let Some((_, dt)) = self.last_discard {
+                                ev.insert("pai".to_string(), Value::String(crate::parser::tid_to_mjai(dt)));
+                            }
                             ev.insert(
                                 "deltas".to_string(),
                                 serde_json::to_value(this_deltas).expect("valid JSON"),
@@ -1070,6 +1103,9 @@ impl GameState3P {
                     p.score_delta = total_deltas[i];
                 }
 
+                for &w_pid in &winners {
+                    self.save_hora_snapshot(w_pid);
+                }
                 self._initialize_next_round(oya_won, false);
             } else if let Some((claimer, action)) = call_claim {
                 self._accept_riichi();
@@ -1930,6 +1966,263 @@ impl GameState3P {
             indicators.push(self.wall.ura_indicator_tiles[i]);
         }
         indicators
+    }
+
+    fn save_hora_snapshot(&mut self, actor: u8) {
+        let p = &self.players[actor as usize];
+        let snap = HoraSnapshot {
+            hand: p.hand.clone(),
+            melds: p.melds.clone(),
+            drawn_tile: self.drawn_tile,
+            last_discard: self.last_discard,
+            riichi_declared: p.riichi_declared,
+            oya: self.oya,
+            dora_indicators: self.wall.dora_indicators.clone(),
+            ura_indicator_tiles: self.wall.ura_indicator_tiles,
+            win_honba_bonus: self.win_honba_bonus.get(&actor).copied().unwrap_or(0),
+            win_riichi_stick_bonus: self.win_riichi_stick_bonus.get(&actor).copied().unwrap_or(0),
+        };
+        self.last_hora_snapshots.insert(actor, snap);
+    }
+
+    pub fn compute_hora_detail(&self, actor: u8) -> Option<crate::types::HoraDetail> {
+        use crate::types::{HoraDetail, YakuEntry};
+        use crate::yaku::{get_yaku_by_id, ID_DORA, ID_AKADORA, ID_URADORA, ID_NUKIDORA};
+
+        let wr = self
+            .win_results
+            .get(&actor)
+            .or_else(|| self.last_win_results.get(&actor))?;
+
+        let snap = self.last_hora_snapshots.get(&actor);
+
+        let is_tsumo = snap
+            .map(|s| s.drawn_tile.is_some())
+            .unwrap_or(self.drawn_tile.is_some());
+        let target: u8 = if is_tsumo {
+            actor
+        } else {
+            snap.map(|s| s.last_discard.map(|(who, _)| who).unwrap_or(actor))
+                .unwrap_or_else(|| self.last_discard.map(|(who, _)| who).unwrap_or(actor))
+        };
+        let is_oya = snap
+            .map(|s| actor == s.oya)
+            .unwrap_or(actor == self.oya);
+
+        let yaku_ids = &wr.yaku;
+        let total_han = wr.han;
+        let is_yakuman = wr.yakuman;
+
+        let winner_riichi = yaku_ids
+            .iter()
+            .any(|&id| id == 2 || id == 18);
+
+        let is_open = snap
+            .map(|s| s.melds.iter().any(|m| m.opened))
+            .unwrap_or_else(|| {
+                self.players[actor as usize]
+                    .melds
+                    .iter()
+                    .any(|m| m.opened)
+            });
+
+        let open_downgrade: std::collections::HashMap<u32, u32> =
+            [(15, 1), (16, 1), (17, 1), (26, 2), (27, 2), (28, 2), (29, 5)]
+                .iter()
+                .cloned()
+                .collect();
+
+        let dora_ids: std::collections::HashSet<u32> =
+            [ID_DORA, ID_AKADORA, ID_URADORA, ID_NUKIDORA]
+                .iter()
+                .cloned()
+                .collect();
+
+        let mut yakus = Vec::new();
+        let mut fixed_total: u32 = 0;
+
+        for &yid in yaku_ids {
+            if let Some(info) = get_yaku_by_id(yid) {
+                if dora_ids.contains(&yid) {
+                    yakus.push(YakuEntry {
+                        id: yid,
+                        name: info.name.clone(),
+                        name_en: info.name_en.clone(),
+                        fan: -1,
+                    });
+                } else {
+                    let base_han = match yid {
+                        1..=14 | 30 => 1u32,
+                        15..=25 => 2u32,
+                        26..=28 => 3u32,
+                        29 => 6u32,
+                        35..=45 => 13u32,
+                        47..=50 => 26u32,
+                        _ => 0u32,
+                    };
+                    let mut han = base_han;
+                    if is_open {
+                        if let Some(&downgrade) = open_downgrade.get(&yid) {
+                            han = base_han.saturating_sub(downgrade);
+                        }
+                    }
+                    yakus.push(YakuEntry {
+                        id: yid,
+                        name: info.name.clone(),
+                        name_en: info.name_en.clone(),
+                        fan: han as i32,
+                    });
+                    fixed_total += han;
+                }
+            }
+        }
+
+        if !is_yakuman {
+            let residual = total_han.saturating_sub(fixed_total);
+            let dora_entries: Vec<usize> = yakus
+                .iter()
+                .enumerate()
+                .filter(|(_, y)| y.fan == -1)
+                .map(|(i, _)| i)
+                .collect();
+            if !dora_entries.is_empty() {
+                let base = residual / dora_entries.len() as u32;
+                let mut extra = residual - base * dora_entries.len() as u32;
+                for &idx in &dora_entries {
+                    let fan = base + if extra > 0 {
+                        extra -= 1;
+                        1
+                    } else {
+                        0
+                    };
+                    yakus[idx].fan = fan as i32;
+                }
+            }
+        } else {
+            for y in &mut yakus {
+                if y.fan == -1 {
+                    y.fan = 0;
+                }
+            }
+        }
+
+        let winning_tile_id = if is_tsumo {
+            snap.map(|s| s.drawn_tile.unwrap_or(0))
+                .unwrap_or(self.drawn_tile.unwrap_or(0))
+        } else {
+            snap.map(|s| s.last_discard.map(|(_, t)| t).unwrap_or(0))
+                .unwrap_or(self.last_discard.map(|(_, t)| t).unwrap_or(0))
+        };
+        let winning_tile_mjai = tid_to_mjai(winning_tile_id);
+
+        let hand_tiles: Vec<u8> = snap
+            .map(|s| s.hand.clone())
+            .unwrap_or_else(|| self.players[actor as usize].hand.clone());
+
+        let melds_raw: Vec<Meld> = snap
+            .map(|s| s.melds.clone())
+            .unwrap_or_else(|| self.players[actor as usize].melds.clone());
+
+        let mut hand_mjai: Vec<String> =
+            hand_tiles.iter().map(|&t| tid_to_mjai(t)).collect();
+        let expected_display = 13 - melds_raw.len() * 3;
+        if hand_mjai.len() > expected_display {
+            let wt34 = winning_tile_id / 4;
+            for i in (0..hand_tiles.len()).rev() {
+                let tile_34 = hand_tiles[i] / 4;
+                if tile_34 == wt34 {
+                    hand_mjai.remove(i);
+                    break;
+                }
+            }
+        }
+
+        let melds_mjai: Vec<Vec<String>> = melds_raw
+            .iter()
+            .map(|m| m.tiles.iter().map(|&t| tid_to_mjai(t)).collect())
+            .collect();
+
+        let dora_indicators: Vec<String> = snap
+            .map(|s| {
+                s.dora_indicators
+                    .iter()
+                    .map(|&t| tid_to_mjai(t))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                self.wall
+                    .dora_indicators
+                    .iter()
+                    .map(|&t| tid_to_mjai(t))
+                    .collect()
+            });
+
+        let ura_indicators: Vec<String> = if winner_riichi {
+            snap.map(|s| {
+                let n = s.dora_indicators.len().min(5);
+                (0..n)
+                    .map(|i| tid_to_mjai(s.ura_indicator_tiles[i]))
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                self._get_ura_indicators()
+                    .iter()
+                    .map(|&t| tid_to_mjai(t))
+                    .collect()
+            })
+        } else {
+            vec![]
+        };
+
+        let honba_bonus = snap
+            .map(|s| s.win_honba_bonus)
+            .unwrap_or_else(|| {
+                self.win_honba_bonus.get(&actor).copied().unwrap_or(0)
+            });
+        let riichi_stick_bonus = snap
+            .map(|s| s.win_riichi_stick_bonus)
+            .unwrap_or_else(|| {
+                self.win_riichi_stick_bonus.get(&actor).copied().unwrap_or(0)
+            });
+
+        let base_score_res = crate::score::calculate_score(
+            wr.han as u8, wr.fu as u8, is_oya, is_tsumo, 0, 3,
+        );
+        let base_score = if is_tsumo {
+            if is_oya {
+                base_score_res.pay_tsumo_ko * 2
+            } else {
+                base_score_res.pay_tsumo_oya + base_score_res.pay_tsumo_ko
+            }
+        } else {
+            base_score_res.pay_ron
+        };
+
+        let score = base_score + honba_bonus + riichi_stick_bonus;
+
+        Some(HoraDetail {
+            actor,
+            target,
+            is_tsumo,
+            is_oya,
+            han: wr.han,
+            fu: wr.fu,
+            yakuman: wr.yakuman,
+            yakus,
+            ron_agari: wr.ron_agari,
+            tsumo_agari_oya: wr.tsumo_agari_oya,
+            tsumo_agari_ko: wr.tsumo_agari_ko,
+            base_score,
+            honba_bonus,
+            riichi_stick_bonus,
+            score,
+            hand: hand_mjai,
+            melds: melds_mjai,
+            winning_tile: winning_tile_mjai,
+            dora_indicators,
+            ura_indicators,
+            winner_riichi,
+        })
     }
 
     pub(crate) fn _process_end_game(&mut self) {

@@ -86,6 +86,13 @@ fn parse_mjai_action(mjai_json: &str, player_id: u8) -> Result<Action, JsValue> 
     Ok(Action::new(action_type, tile, consume_tiles, Some(player_id)))
 }
 
+fn tile_type(tid: Option<u8>) -> u8 {
+    match tid {
+        Some(t) => t / 4,
+        None => 255,
+    }
+}
+
 fn find_matching_action(legal: &[Action], target: &Action) -> Option<Action> {
     match target.action_type {
         ActionType::Tsumo | ActionType::Ron => legal
@@ -98,11 +105,17 @@ fn find_matching_action(legal: &[Action], target: &Action) -> Option<Action> {
             .cloned(),
         ActionType::Discard | ActionType::Riichi => legal
             .iter()
-            .find(|a| a.action_type == target.action_type && a.tile == target.tile)
+            .find(|a| {
+                a.action_type == target.action_type
+                    && tile_type(a.tile) == tile_type(target.tile)
+            })
             .cloned(),
         _ => legal
             .iter()
-            .find(|a| a.action_type == target.action_type && a.tile == target.tile)
+            .find(|a| {
+                a.action_type == target.action_type
+                    && tile_type(a.tile) == tile_type(target.tile)
+            })
             .or_else(|| {
                 legal
                     .iter()
@@ -460,13 +473,26 @@ pub fn sanma_select_action_from_mjai(
 #[wasm_bindgen]
 pub fn sanma_win_results() -> Result<JsValue, JsValue> {
     with_state_ref(|state| {
-        let results: HashMap<String, &WinResult> = state
-            .win_results
-            .iter()
-            .map(|(&k, v)| (k.to_string(), v))
-            .collect();
+        let mut results: HashMap<String, &WinResult> = HashMap::new();
+        for (&k, v) in &state.win_results {
+            results.insert(k.to_string(), v);
+        }
+        for (&k, v) in &state.last_win_results {
+            results.entry(k.to_string()).or_insert(v);
+        }
         serde_wasm_bindgen::to_value(&results).unwrap_or_else(|_| JsValue::NULL)
     })
+}
+
+#[wasm_bindgen]
+pub fn sanma_hora_detail(actor: u8) -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        match state.compute_hora_detail(actor) {
+            Some(detail) => serde_wasm_bindgen::to_value(&detail)
+                .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e))),
+            None => Ok(JsValue::NULL),
+        }
+    })?
 }
 
 #[wasm_bindgen]
