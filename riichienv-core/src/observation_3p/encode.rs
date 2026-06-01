@@ -614,6 +614,65 @@ impl Observation3P {
     }
 }
 
+impl Observation3P {
+    pub fn encode_to_vec(&self) -> Vec<f32> {
+        const BASE_CH: usize = 73;
+        const DISCARD_DECAY_CH: usize = 3;
+        const SHANTEN_CH: usize = 12;
+        const ANKAN_CH: usize = 3;
+        const FUURO_CH: usize = 60;
+        const ACTION_AVAIL_CH: usize = 11;
+        const DISCARD_CAND_CH: usize = 5;
+        const PASS_CTX_CH: usize = 3;
+        const LAST_TED_CH: usize = 6;
+        const RIICHI_SUTE_CH: usize = 6;
+        const TOTAL_CH: usize = BASE_CH
+            + DISCARD_DECAY_CH
+            + SHANTEN_CH
+            + ANKAN_CH
+            + FUURO_CH
+            + ACTION_AVAIL_CH
+            + DISCARD_CAND_CH
+            + PASS_CTX_CH
+            + LAST_TED_CH
+            + RIICHI_SUTE_CH;
+
+        let mut buf = vec![0.0f32; TOTAL_CH * TILE_DIM_3P];
+
+        let mut offset = 0;
+        self.encode_base_into(&mut buf, offset);
+        offset += BASE_CH;
+
+        self.encode_discard_decay_into(&mut buf, offset);
+        offset += DISCARD_DECAY_CH;
+
+        self.encode_shanten_into(&mut buf, offset);
+        offset += SHANTEN_CH;
+
+        self.encode_ankan_into(&mut buf, offset);
+        offset += ANKAN_CH;
+
+        self.encode_fuuro_into(&mut buf, offset);
+        offset += FUURO_CH;
+
+        self.encode_action_avail_into(&mut buf, offset);
+        offset += ACTION_AVAIL_CH;
+
+        self.encode_discard_cand_into(&mut buf, offset);
+        offset += DISCARD_CAND_CH;
+
+        self.encode_pass_ctx_into(&mut buf, offset);
+        offset += PASS_CTX_CH;
+
+        self.encode_last_ted_into(&mut buf, offset);
+        offset += LAST_TED_CH;
+
+        self.encode_riichi_sute_into(&mut buf, offset);
+
+        buf
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

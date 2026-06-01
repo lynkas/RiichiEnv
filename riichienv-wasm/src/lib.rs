@@ -1,12 +1,130 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use wasm_bindgen::prelude::*;
 
+use riichienv_core::action::{Action, ActionType};
 use riichienv_core::hand_evaluator::HandEvaluator;
 use riichienv_core::hand_evaluator_3p::HandEvaluator3P;
+use riichienv_core::observation_3p::Observation3P;
 use riichienv_core::parser::{mjai_to_tid, tid_to_mjai};
-use riichienv_core::types::{Conditions, Meld, MeldType, Wind};
+use riichienv_core::rule::GameRule;
+use riichienv_core::state_3p::legal_actions::GameState3PLegalActions;
+use riichienv_core::state_3p::GameState3P;
+use riichienv_core::types::{Conditions, Meld, MeldType, WinResult, Wind};
 use riichienv_core::{score, yaku};
 
-/// Input format for melds passed from JavaScript.
+thread_local! {
+    static GAME_STATE: RefCell<Option<GameState3P>> = const { RefCell::new(None) };
+}
+
+fn with_state_mut<F, R>(f: F) -> Result<R, JsValue>
+where
+    F: FnOnce(&mut GameState3P) -> R,
+{
+    GAME_STATE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        match borrow.as_mut() {
+            Some(state) => Ok(f(state)),
+            None => Err(JsValue::from_str(
+                "No game in progress. Call sanma_new_game() first.",
+            )),
+        }
+    })
+}
+
+fn with_state_ref<F, R>(f: F) -> Result<R, JsValue>
+where
+    F: FnOnce(&GameState3P) -> R,
+{
+    GAME_STATE.with(|cell| {
+        let borrow = cell.borrow();
+        match borrow.as_ref() {
+            Some(state) => Ok(f(state)),
+            None => Err(JsValue::from_str(
+                "No game in progress. Call sanma_new_game() first.",
+            )),
+        }
+    })
+}
+
+fn parse_mjai_action(mjai_json: &str, player_id: u8) -> Result<Action, JsValue> {
+    let v: serde_json::Value = serde_json::from_str(mjai_json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse MJAI JSON: {}", e)))?;
+
+    let type_str = v["type"].as_str().unwrap_or("");
+    let action_type = match type_str {
+        "dahai" => ActionType::Discard,
+        "hora" => ActionType::Ron,
+        "reach" => ActionType::Riichi,
+        "pon" => ActionType::Pon,
+        "daiminkan" => ActionType::Daiminkan,
+        "ankan" => ActionType::Ankan,
+        "kakan" => ActionType::Kakan,
+        "ryukyoku" => ActionType::KyushuKyuhai,
+        "kita" => ActionType::Kita,
+        "none" => ActionType::Pass,
+        _ => {
+            return Err(JsValue::from_str(&format!(
+                "Unknown MJAI action type: {}",
+                type_str
+            )))
+        }
+    };
+
+    let tile = v["pai"].as_str().and_then(|s| mjai_to_tid(s));
+    let consume_tiles: Vec<u8> = v
+        .get("consumed")
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().and_then(|s| mjai_to_tid(s)))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(Action::new(action_type, tile, consume_tiles, Some(player_id)))
+}
+
+fn find_matching_action(legal: &[Action], target: &Action) -> Option<Action> {
+    match target.action_type {
+        ActionType::Tsumo | ActionType::Ron => legal
+            .iter()
+            .find(|a| matches!(a.action_type, ActionType::Tsumo | ActionType::Ron))
+            .cloned(),
+        ActionType::Kita => legal
+            .iter()
+            .find(|a| a.action_type == ActionType::Kita)
+            .cloned(),
+        ActionType::Discard | ActionType::Riichi => legal
+            .iter()
+            .find(|a| a.action_type == target.action_type && a.tile == target.tile)
+            .cloned(),
+        _ => legal
+            .iter()
+            .find(|a| a.action_type == target.action_type && a.tile == target.tile)
+            .or_else(|| {
+                legal
+                    .iter()
+                    .find(|a| a.action_type == target.action_type)
+            })
+            .cloned(),
+    }
+}
+
+#[derive(serde::Serialize)]
+struct StepResult {
+    active_players: Vec<u8>,
+    current_player: u8,
+    phase: String,
+    is_done: bool,
+    last_error: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Existing score/wait/tile utilities (unchanged)
+// ---------------------------------------------------------------------------
+
 #[derive(serde::Deserialize)]
 struct MeldInput {
     meld_type: String,
@@ -33,7 +151,6 @@ impl MeldInput {
     }
 }
 
-/// Input format for scoring conditions passed from JavaScript.
 #[derive(Default, serde::Deserialize)]
 #[serde(default)]
 struct ConditionsInput {
@@ -80,7 +197,6 @@ impl ConditionsInput {
     }
 }
 
-/// Output format for scoring results returned to JavaScript.
 #[derive(serde::Serialize)]
 struct ScoreResult {
     is_win: bool,
@@ -127,11 +243,6 @@ fn apply_double_yakuman_rules(score: &mut ScoreResult, conditions: &ConditionsIn
     score.tsumo_agari_ko = score_res.pay_tsumo_ko;
 }
 
-/// Calculate wait tiles (machi) for a given hand.
-///
-/// Input: JSON array of tile IDs (136-encoding) for hand tiles.
-/// Melds: JSON array of meld objects (optional).
-/// Returns: JSON array of wait tile types (34-encoding).
 #[wasm_bindgen]
 pub fn calc_waits(tiles_json: &str, melds_json: &str) -> Result<JsValue, JsValue> {
     let tiles: Vec<u8> = serde_json::from_str(tiles_json)
@@ -149,10 +260,6 @@ pub fn calc_waits(tiles_json: &str, melds_json: &str) -> Result<JsValue, JsValue
         .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
 }
 
-/// Calculate score for a winning hand.
-///
-/// Input: hand tiles (136-encoding), win tile, dora indicators, and conditions.
-/// Returns: score result as JSON.
 #[wasm_bindgen]
 pub fn calc_score(
     tiles_json: &str,
@@ -204,16 +311,199 @@ pub fn calc_score(
         .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
 }
 
-/// Convert MJAI tile string to 136-encoding tile ID.
 #[wasm_bindgen]
 pub fn mjai_to_tile_id(mjai: &str) -> Option<u8> {
     mjai_to_tid(mjai)
 }
 
-/// Convert 136-encoding tile ID to MJAI tile string.
 #[wasm_bindgen]
 pub fn tile_id_to_mjai(tid: u8) -> String {
     tid_to_mjai(tid)
+}
+
+// ---------------------------------------------------------------------------
+// Sanma State3P game lifecycle bindings
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen]
+pub fn sanma_new_game(seed: u32) -> Result<JsValue, JsValue> {
+    let state = GameState3P::new(
+        5,
+        false,
+        Some(seed as u64),
+        0,
+        GameRule::default_mjsoul(),
+    );
+    GAME_STATE.with(|cell| {
+        *cell.borrow_mut() = Some(state);
+    });
+    let info = with_state_ref(|s| {
+        serde_json::json!({
+            "active_players": s.active_players,
+            "current_player": s.current_player,
+            "phase": format!("{:?}", s.phase),
+            "is_done": s.is_done,
+            "oya": s.oya,
+            "scores": s.players.iter().map(|p| p.score).collect::<Vec<_>>(),
+            "dora_indicators": s.wall.dora_indicators,
+            "hands": s.players.iter().map(|p| p.hand.iter().map(|&t| t as u32).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        })
+    })?;
+    serde_wasm_bindgen::to_value(&info)
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+}
+
+#[wasm_bindgen]
+pub fn sanma_legal_actions(player_id: u8) -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        let actions = state._get_legal_actions_internal(player_id);
+        let action_dicts: Vec<serde_json::Value> = actions
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "action_type": format!("{:?}", a.action_type),
+                    "tile": a.tile,
+                    "consume_tiles": a.consume_tiles,
+                    "actor": a.actor,
+                    "mjai": a.to_mjai(),
+                })
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&action_dicts)
+            .unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_step(actions_json: &str) -> Result<JsValue, JsValue> {
+    let actions: HashMap<u8, Action> = serde_json::from_str(actions_json).map_err(|e| {
+        JsValue::from_str(&format!("Failed to parse actions JSON: {}", e))
+    })?;
+
+    with_state_mut(|state| {
+        state.step(&actions);
+
+        let result = StepResult {
+            active_players: state.active_players.clone(),
+            current_player: state.current_player,
+            phase: format!("{:?}", state.phase),
+            is_done: state.is_done,
+            last_error: state.last_error.clone(),
+        };
+
+        serde_wasm_bindgen::to_value(&result)
+            .unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_mjai_log() -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        let log: Vec<serde_json::Value> = state
+            .mjai_log
+            .iter()
+            .filter_map(|s| serde_json::from_str(s).ok())
+            .collect();
+        serde_wasm_bindgen::to_value(&log).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_is_done() -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        serde_wasm_bindgen::to_value(&state.is_done).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_scores() -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        let scores: Vec<i32> = state.players.iter().map(|p| p.score).collect();
+        serde_wasm_bindgen::to_value(&scores).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_observation(player_id: u8) -> Result<JsValue, JsValue> {
+    with_state_mut(|state| {
+        let obs: Observation3P = state.get_observation(player_id);
+        serde_wasm_bindgen::to_value(&obs).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_encode(player_id: u8) -> Result<JsValue, JsValue> {
+    with_state_mut(|state| {
+        let obs: Observation3P = state.get_observation(player_id);
+        let encoded = obs.encode_to_vec();
+        serde_wasm_bindgen::to_value(&encoded).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_select_action_from_mjai(
+    player_id: u8,
+    mjai_json: &str,
+) -> Result<JsValue, JsValue> {
+    let target = parse_mjai_action(mjai_json, player_id)?;
+
+    with_state_ref(|state| {
+        let legal = state._get_legal_actions_internal(player_id);
+        match find_matching_action(&legal, &target) {
+            Some(action) => serde_wasm_bindgen::to_value(&action)
+                .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e))),
+            None => Err(JsValue::from_str("No matching legal action found")),
+        }
+    })?
+}
+
+#[wasm_bindgen]
+pub fn sanma_win_results() -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        let results: HashMap<String, &WinResult> = state
+            .win_results
+            .iter()
+            .map(|(&k, v)| (k.to_string(), v))
+            .collect();
+        serde_wasm_bindgen::to_value(&results).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_dora_indicators() -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        let indicators: Vec<u32> = state
+            .wall
+            .dora_indicators
+            .iter()
+            .map(|&t| t as u32)
+            .collect();
+        serde_wasm_bindgen::to_value(&indicators).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_hands() -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        let hands: Vec<Vec<u32>> = state
+            .players
+            .iter()
+            .map(|p| p.hand.iter().map(|&t| t as u32).collect())
+            .collect();
+        serde_wasm_bindgen::to_value(&hands).unwrap_or_else(|_| JsValue::NULL)
+    })
+}
+
+#[wasm_bindgen]
+pub fn sanma_melds() -> Result<JsValue, JsValue> {
+    with_state_ref(|state| {
+        let melds: Vec<Vec<&Meld>> = state
+            .players
+            .iter()
+            .map(|p| p.melds.iter().collect())
+            .collect();
+        serde_wasm_bindgen::to_value(&melds).unwrap_or_else(|_| JsValue::NULL)
+    })
 }
 
 #[cfg(test)]
@@ -260,5 +550,77 @@ mod tests {
 
         assert_eq!(score.han, 26);
         assert_eq!(score.ron_agari, 64000);
+    }
+
+    #[test]
+    fn sanma_new_game_creates_valid_state() {
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        assert!(!state.is_done);
+        assert_eq!(state.active_players, vec![0]);
+        assert_eq!(state.players.len(), 3);
+        assert_eq!(state.wall.dora_indicators.len(), 1);
+    }
+
+    #[test]
+    fn sanma_legal_actions_for_dealer() {
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let actions = state._get_legal_actions_internal(0);
+        assert!(!actions.is_empty());
+    }
+
+    #[test]
+    fn sanma_step_discard() {
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let actions = state._get_legal_actions_internal(0);
+        let discard = actions
+            .iter()
+            .find(|a| a.action_type == ActionType::Discard)
+            .expect("should have a discard action");
+        let mut map = HashMap::new();
+        map.insert(0u8, discard.clone());
+        state.step(&map);
+        assert!(!state.is_done);
+    }
+
+    #[test]
+    fn sanma_scores_start_at_35000() {
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        for p in &state.players {
+            assert_eq!(p.score, 35000);
+        }
+    }
+
+    #[test]
+    fn sanma_hands_have_correct_tile_count() {
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        assert_eq!(state.players[state.oya as usize].hand.len(), 14);
+        for (i, p) in state.players.iter().enumerate() {
+            if i != state.oya as usize {
+                assert_eq!(p.hand.len(), 13);
+            }
+        }
+    }
+
+    #[test]
+    fn sanma_mjai_log_has_events() {
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        assert!(!state.mjai_log.is_empty());
+    }
+
+    #[test]
+    fn sanma_observation_serializes() {
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let obs = state.get_observation(0);
+        assert_eq!(obs.player_id, 0);
+        let json = serde_json::to_value(&obs).unwrap();
+        assert!(json.is_object());
+    }
+
+    #[test]
+    fn sanma_encode_returns_vector() {
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let obs = state.get_observation(0);
+        let encoded = obs.encode_to_vec();
+        assert_eq!(encoded.len(), 182 * 27);
     }
 }

@@ -278,7 +278,7 @@ impl Conditions {
 }
 
 #[cfg_attr(feature = "python", pyclass(get_all, set_all, from_py_object))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WinResult {
     pub is_win: bool,
     pub yakuman: bool,
