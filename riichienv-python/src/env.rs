@@ -608,6 +608,11 @@ impl RiichiEnv {
     }
 
     #[getter]
+    pub fn get_last_win_results(&self) -> HashMap<u8, WinResult> {
+        with_variant!(self, |s| s.last_win_results.clone())
+    }
+
+    #[getter]
     pub fn get_score_deltas(&self) -> Vec<i32> {
         with_variant!(self, |s| s.players.iter().map(|p| p.score_delta).collect())
     }

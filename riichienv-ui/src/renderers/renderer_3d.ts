@@ -338,8 +338,11 @@ export class Renderer3D implements IRenderer {
         // Call overlay
         this.renderCallOverlay(uiOverlay, state);
 
-        // Wait indicators for all players (UI overlay)
+        // Wait indicators — sanma-shell: only show for the current viewpoint
+        // (i.e. the human player). Hiding opponents' waits avoids leaking
+        // closed-hand information.
         state.players.forEach((p, i) => {
+            if (i !== this.viewpoint) return;
             if (p.waits && p.waits.length > 0) {
                 const relIndex = (i - this.viewpoint + pc) % pc;
                 const waitEl = this.renderWaitIndicator(p.waits, relIndex, pc);
@@ -880,7 +883,9 @@ export class Renderer3D implements IRenderer {
         player.hand.forEach((t) => {
             const tile = document.createElement('div');
             tile.className = 'opp-tile';
-            this.setTile3D(tile, t, tw, faces);
+            // sanma-shell patch: render opponent hand tiles face-down ('back')
+            // so the human player can't see what opponents hold.
+            this.setTile3D(tile, 'back', tw, faces);
             if (activeWaits.size > 0 && activeWaits.has(normalize(t))) {
                 this.addTile3DOverlay(tile, 'rgba(255, 0, 0, 0.4)', '10');
             }

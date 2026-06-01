@@ -1632,8 +1632,10 @@ impl GameState3P {
         self.pending_oya_won = false;
         self.pending_is_draw = false;
         self.last_discard = None;
-        self.win_results.clear();
-        self.last_win_results.clear();
+        // sanma-shell patch: keep last_win_results pointing at the
+        // previous kyoku's results so external readers can still inspect
+        // them after this round-init clears win_results.
+        self.last_win_results = std::mem::take(&mut self.win_results);
         self.round_end_scores = None;
         self.riichi_sutehais = [None; NP];
         self.last_tedashis = [None; NP];

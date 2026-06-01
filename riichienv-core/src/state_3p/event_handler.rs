@@ -64,8 +64,11 @@ impl GameState3PEventHandler for GameState3P {
                 self.is_first_turn = true;
                 self.riichi_pending_acceptance = None;
                 self.drawn_tile = None;
-                self.win_results.clear();
-                self.last_win_results.clear();
+                // sanma-shell patch: preserve the previous kyoku's win
+                // results so external readers (Python clients reading
+                // env.last_win_results) can still inspect them after the
+                // start_kyoku that follows hora in the same step().
+                self.last_win_results = std::mem::take(&mut self.win_results);
                 self.round_end_scores = None;
                 self.last_error = None;
                 self.is_after_kan = false;
