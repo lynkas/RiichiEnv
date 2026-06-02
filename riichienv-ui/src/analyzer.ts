@@ -5,13 +5,13 @@ import type { KyokuKeyEvent, KyokuPlayerAction, KyokuResult, KyokuSummary, Kyoku
 function meldLabel(type: string): string {
     switch (type) {
         case 'chi':
-            return 'Chi';
+            return 'チー';
         case 'pon':
-            return 'Pon';
+            return 'ポン';
         case 'daiminkan':
         case 'ankan':
         case 'kakan':
-            return 'Kan';
+            return 'カン';
         default:
             return type;
     }
@@ -169,7 +169,7 @@ export function computeKyokuKeyEvents(gameState: GameState, kyokuIndex: number):
         switch (evt.type) {
             case 'reach':
                 if (evt.actor !== undefined && (!evt.step || evt.step === '1' || evt.step === 1)) {
-                    keyEvents.push({ step: i, type: 'reach', actor: evt.actor, label: 'Riichi' });
+                    keyEvents.push({ step: i, type: 'reach', actor: evt.actor, label: 'リーチ' });
                 }
                 break;
             case 'chi':
@@ -194,7 +194,7 @@ export function computeKyokuKeyEvents(gameState: GameState, kyokuIndex: number):
                         step: i,
                         type: 'hora',
                         actor: evt.actor,
-                        label: isTsumo ? 'Tsumo' : 'Ron',
+                        label: isTsumo ? 'ツモ' : 'ロン',
                     });
                 }
                 break;

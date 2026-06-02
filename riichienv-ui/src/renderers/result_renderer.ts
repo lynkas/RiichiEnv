@@ -41,7 +41,7 @@ export class ResultRenderer {
             header.className = 're-modal-title';
             const actorName = state.playerNames?.[actor] || `P${actor}`;
             const targetName = state.playerNames?.[target] || `P${target}`;
-            const titleText = `${actorName} ${isTsumo ? 'Tsumo' : `Ron from ${targetName}`}`;
+            const titleText = `${actorName} ${isTsumo ? 'ツモ' : `ロン ${targetName}`}`;
             header.textContent = totalPages > 1 ? `${titleText} (${idx + 1}/${totalPages})` : titleText;
             content.appendChild(header);
 
@@ -197,13 +197,13 @@ export class ResultRenderer {
             };
 
             if (state.doraMarkers && state.doraMarkers.length > 0) {
-                doraContainer.appendChild(createIndicatorRow('Dora:', state.doraMarkers));
+                doraContainer.appendChild(createIndicatorRow('ドラ:', state.doraMarkers));
             }
 
             // Ura Dora
             // Now accessed via res.uraMarkers (enriched in GameState)
             if (res.uraMarkers && Array.isArray(res.uraMarkers) && res.uraMarkers.length > 0) {
-                doraContainer.appendChild(createIndicatorRow('Ura Dora:', res.uraMarkers));
+                doraContainer.appendChild(createIndicatorRow('裏ドラ:', res.uraMarkers));
             }
 
             body.appendChild(doraContainer);
@@ -218,7 +218,7 @@ export class ResultRenderer {
                     color: '#aaa',
                     fontStyle: 'italic',
                 });
-                noScoreMsg.textContent = 'Score data unavailable';
+                noScoreMsg.textContent = '点数データなし';
                 body.appendChild(noScoreMsg);
                 content.appendChild(body);
             } else {
@@ -287,7 +287,7 @@ export class ResultRenderer {
                         borderTop: '1px solid #444',
                         paddingTop: '10px',
                     });
-                    statsRow.innerHTML = `<span>${score.han} Han</span><span>${score.fu} Fu</span>`;
+                    statsRow.innerHTML = `<span>${score.han} 飜</span><span>${score.fu} 符</span>`;
                     body.appendChild(statsRow);
                 }
 
@@ -296,7 +296,7 @@ export class ResultRenderer {
                 // 6. Points
                 const scoreDisplay = document.createElement('div');
                 scoreDisplay.className = 're-score-display';
-                scoreDisplay.textContent = `${score.points} Points`;
+                scoreDisplay.textContent = `${score.points} 点`;
                 content.appendChild(scoreDisplay);
             }
 
@@ -359,7 +359,7 @@ export class ResultRenderer {
         // Header
         const header = document.createElement('div');
         header.className = 're-modal-title';
-        header.textContent = 'Ryukyoku';
+        header.textContent = '流局';
         content.appendChild(header);
 
         // Body
@@ -380,9 +380,9 @@ export class ResultRenderer {
             reasonDiv.style.fontWeight = 'bold';
 
             if (details.reason === 'Error') {
-                reasonDiv.innerHTML = 'Reason: <span style="color: #ff4757;">Error (Penalty)</span>';
+                reasonDiv.innerHTML = '<span style="color: #ff4757;">错误(罚分)</span>';
             } else {
-                reasonDiv.textContent = `Reason: ${details.reason}`;
+                reasonDiv.textContent = details.reason;
             }
             body.appendChild(reasonDiv);
         }
@@ -412,7 +412,7 @@ export class ResultRenderer {
                 });
 
                 const name = document.createElement('div');
-                name.textContent = state.playerNames?.[i] || `Player ${i}`;
+                name.textContent = state.playerNames?.[i] || `P${i}`;
                 name.style.fontSize = '0.9em';
                 name.style.color = '#ccc';
 
@@ -471,18 +471,16 @@ export class ResultRenderer {
         isYakuman: boolean,
         isKazoe: boolean,
     ): { text: string; css: string } | null {
-        if (isYakuman) return { text: 'Yakuman', css: 'limit-yakuman' };
-        if (isKazoe) return { text: 'Kazoe Yakuman', css: 'limit-yakuman' }; // Re-use yakuman style for Kazoe
-        if (han >= 11) return { text: 'Sanbaiman', css: 'limit-sanbaiman' };
-        if (han >= 8) return { text: 'Baiman', css: 'limit-baiman' };
-        if (han >= 6) return { text: 'Haneman', css: 'limit-haneman' };
+        if (isYakuman) return { text: '役満', css: 'limit-yakuman' };
+        if (isKazoe) return { text: '数え役満', css: 'limit-yakuman' };
+        if (han >= 11) return { text: '三倍満', css: 'limit-sanbaiman' };
+        if (han >= 8) return { text: '倍満', css: 'limit-baiman' };
+        if (han >= 6) return { text: '跳満', css: 'limit-haneman' };
 
         // Mangan Check
-        if (han >= 5) return { text: 'Mangan', css: 'limit-mangan' };
-        // Kiriage Mangan: 4 han 30 fu is 7700 (not mangan), 4 han 40 fu is Mangan (8000)
-        // 3 Han 70 fu is Mangan (8000)
-        if (han === 4 && fu >= 40) return { text: 'Mangan', css: 'limit-mangan' };
-        if (han === 3 && fu >= 70) return { text: 'Mangan', css: 'limit-mangan' };
+        if (han >= 5) return { text: '満貫', css: 'limit-mangan' };
+        if (han === 4 && fu >= 40) return { text: '満貫', css: 'limit-mangan' };
+        if (han === 3 && fu >= 70) return { text: '満貫', css: 'limit-mangan' };
 
         return null;
     }

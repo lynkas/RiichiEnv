@@ -182,12 +182,17 @@ export class Renderer2D implements IRenderer {
                 const type = state.lastEvent.type;
                 if (['chi', 'pon', 'kan', 'ankan', 'daiminkan', 'kakan', 'reach', 'kita'].includes(type)) {
                     label = type.charAt(0).toUpperCase() + type.slice(1);
-                    if (type === 'daiminkan') label = 'Kan';
-                    if (type === 'reach') label = 'Reach';
-                    if (type === 'kita') label = 'Pei';
+                    if (type === 'daiminkan') label = 'カン';
+                    if (type === 'reach') label = 'リーチ';
+                    if (type === 'kita') label = 'キタ';
+                    if (type === 'chi') label = 'チー';
+                    if (type === 'pon') label = 'ポン';
+                    if (type === 'kan') label = 'カン';
+                    if (type === 'ankan') label = 'カン';
+                    if (type === 'kakan') label = 'カン';
                     showOverlay = true;
                 } else if (type === 'hora') {
-                    label = state.lastEvent.target === state.lastEvent.actor ? 'Tsumo' : 'Ron';
+                    label = state.lastEvent.target === state.lastEvent.actor ? 'ツモ' : 'ロン';
                     showOverlay = true;
                 }
             }
@@ -198,7 +203,7 @@ export class Renderer2D implements IRenderer {
                 showOverlay = true;
             }
 
-            if (showOverlay && label) {
+            if (false && showOverlay && label) {
                 const overlay = document.createElement('div');
                 overlay.className = 'call-overlay';
                 overlay.textContent = label;

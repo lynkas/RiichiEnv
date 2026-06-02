@@ -492,7 +492,7 @@ export class Renderer3D implements IRenderer {
 
         // Row 2: Honba / Kyotaku
         const row2 = document.createElement('div');
-        row2.textContent = `Depo: ${state.kyotaku}, Honba: ${state.honba}`;
+        row2.textContent = `立${state.kyotaku}　本${state.honba}　残${state.wallRemaining ?? 0}`;
         Object.assign(row2.style, {
             fontSize: '16px',
             fontWeight: 'bold',
@@ -1281,6 +1281,7 @@ export class Renderer3D implements IRenderer {
     // Call overlay (UI overlay)
     // =========================================================================
     private renderCallOverlay(overlay: HTMLElement, state: BoardState): void {
+        return;   // Disabled — using game-ui.js call banners instead
         if (!state.lastEvent) return;
 
         let label = '';
@@ -1298,7 +1299,7 @@ export class Renderer3D implements IRenderer {
                 callCssClass = callDef.cssClass;
                 actorIdx = evt.actor;
             } else if (type === 'hora') {
-                label = evt.target === evt.actor ? 'Tsumo' : 'Ron';
+                label = evt.target === evt.actor ? 'ツモ' : 'ロン';
                 callCssClass = 'call-hora';
                 actorIdx = evt.actor;
             }

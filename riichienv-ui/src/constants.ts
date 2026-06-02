@@ -75,12 +75,12 @@ export const COLORS = {
 };
 
 export const CALL_TYPES: { [key: string]: { label: string; cssClass?: string } } = {
-    chi: { label: 'Chii', cssClass: 'call-chii' },
-    pon: { label: 'Pon', cssClass: 'call-pon' },
-    kan: { label: 'Kan', cssClass: 'call-kan' },
-    ankan: { label: 'Kan', cssClass: 'call-kan' },
-    daiminkan: { label: 'Kan', cssClass: 'call-kan' },
-    kakan: { label: 'Kan', cssClass: 'call-kan' },
-    reach: { label: 'Riichi', cssClass: 'call-reach' },
-    kita: { label: 'Pei', cssClass: 'call-kan' },
+    chi: { label: 'チー', cssClass: 'call-chii' },
+    pon: { label: 'ポン', cssClass: 'call-pon' },
+    kan: { label: 'カン', cssClass: 'call-kan' },
+    ankan: { label: 'カン', cssClass: 'call-kan' },
+    daiminkan: { label: 'カン', cssClass: 'call-kan' },
+    kakan: { label: 'カン', cssClass: 'call-kan' },
+    reach: { label: 'リーチ', cssClass: 'call-reach' },
+    kita: { label: 'キタ', cssClass: 'call-kan' },
 };

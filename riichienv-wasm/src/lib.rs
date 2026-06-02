@@ -532,6 +532,51 @@ pub fn sanma_melds() -> Result<JsValue, JsValue> {
     })
 }
 
+#[wasm_bindgen]
+pub fn sanma_new_game_with_wall(wall_json: &str) -> Result<JsValue, JsValue> {
+    let wall_tiles: Vec<u8> = serde_json::from_str(wall_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid wall JSON: {}", e)))?;
+    if wall_tiles.len() != 108 {
+        return Err(JsValue::from_str(&format!("Wall must have 108 tiles, got {}", wall_tiles.len())));
+    }
+    let mut state = GameState3P::new(
+        5,
+        false,
+        Some(0u64),
+        0,
+        GameRule::default_mjsoul(),
+    );
+    let oya = state.oya;
+    let round_wind = state.round_wind;
+    let honba = state.honba;
+    let riichi_sticks = state.riichi_sticks;
+    state._initialize_round(
+        oya,
+        round_wind,
+        honba,
+        riichi_sticks,
+        Some(wall_tiles),
+        None,
+    );
+    GAME_STATE.with(|cell| {
+        *cell.borrow_mut() = Some(state);
+    });
+    let info = with_state_ref(|s| {
+        serde_json::json!({
+            "active_players": s.active_players,
+            "current_player": s.current_player,
+            "phase": format!("{:?}", s.phase),
+            "is_done": s.is_done,
+            "oya": s.oya,
+            "scores": s.players.iter().map(|p| p.score).collect::<Vec<_>>(),
+            "dora_indicators": s.wall.dora_indicators,
+            "hands": s.players.iter().map(|p| p.hand.iter().map(|&t| t as u32).collect::<Vec<_>>()).collect::<Vec<_>>(),
+        })
+    })?;
+    serde_wasm_bindgen::to_value(&info)
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
