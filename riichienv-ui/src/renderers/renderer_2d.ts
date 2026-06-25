@@ -319,8 +319,8 @@ export class Renderer2D implements IRenderer {
             (board.style as any).contentVisibility = '';
         }
 
-        // End Kyoku Modal
-        if (state.lastEvent && state.lastEvent.type === 'end_kyoku' && state.lastEvent.meta) {
+        // End Kyoku Modal — disabled
+        if (false && state.lastEvent && state.lastEvent.type === 'end_kyoku' && state.lastEvent.meta) {
             let modal: HTMLElement | null = null;
 
             if (state.lastEvent.meta.ryukyoku) {

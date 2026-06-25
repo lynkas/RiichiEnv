@@ -14,6 +14,7 @@ export class Renderer3D implements IRenderer {
     onViewpointChange: ((pIdx: number) => void) | null = null;
     onCenterClick: (() => void) | null = null;
 
+    public revealedPlayers: Set<number> = new Set();
     private sceneEl: HTMLElement | null = null;
     private layout: LayoutConfig3D;
     private _hadModal: boolean = false;
@@ -355,8 +356,8 @@ export class Renderer3D implements IRenderer {
         // Single DOM swap — replaces all scene content in one operation
         this.sceneEl.replaceChildren(sceneFrag);
 
-        // 6. Result modals
-        if (state.lastEvent && state.lastEvent.type === 'end_kyoku' && state.lastEvent.meta) {
+        // 6. Result modals — disabled
+        if (false && state.lastEvent && state.lastEvent.type === 'end_kyoku' && state.lastEvent.meta) {
             let modal: HTMLElement | null = null;
             if (state.lastEvent.meta.ryukyoku) {
                 modal = ResultRenderer.renderRyukyokuModal(state.lastEvent.meta.ryukyoku, state);
@@ -781,6 +782,7 @@ export class Renderer3D implements IRenderer {
                 const isRiichi = d.isRiichi;
                 const cell = document.createElement('div');
                 cell.className = isRiichi ? 'table-tile-rotated' : 'table-tile';
+                cell.dataset.pai = d.tile;
                 if (d.isTsumogiri) cell.classList.add('table-tile-tsumogiri');
 
                 const tileDepth = tw;
@@ -883,9 +885,7 @@ export class Renderer3D implements IRenderer {
         player.hand.forEach((t) => {
             const tile = document.createElement('div');
             tile.className = 'opp-tile';
-            // sanma-shell patch: render opponent hand tiles face-down ('back')
-            // so the human player can't see what opponents hold.
-            this.setTile3D(tile, 'back', tw, faces);
+            this.setTile3D(tile, this.revealedPlayers.has(playerIdx) ? t : 'back', tw, faces);
             if (activeWaits.size > 0 && activeWaits.has(normalize(t))) {
                 this.addTile3DOverlay(tile, 'rgba(255, 0, 0, 0.4)', '10');
             }

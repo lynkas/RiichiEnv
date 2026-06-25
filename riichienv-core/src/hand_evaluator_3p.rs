@@ -299,7 +299,7 @@ pub fn check_riichi_candidates_3p(tiles_136: Vec<u8>) -> Vec<u32> {
 
 /// Sanma dora indicator -> dora tile mapping.
 /// In sanma, manzu wraps 1m(0)->9m(8) and 9m(8)->1m(0) directly (skipping 2m-8m).
-fn get_next_tile_sanma(tile: u8) -> u8 {
+pub(crate) fn get_next_tile_sanma(tile: u8) -> u8 {
     match tile {
         0 => 8,        // 1m -> 9m
         8 => 0,        // 9m -> 1m

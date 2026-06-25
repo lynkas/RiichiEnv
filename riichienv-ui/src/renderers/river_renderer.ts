@@ -32,6 +32,7 @@ export class RiverRenderer {
                 cell.style.height = '46px';
                 cell.style.position = 'relative'; // Important for overlay
                 cell.style.flexShrink = '0'; // Prevent shrinking in 3rd row
+                cell.dataset.pai = d.tile;
 
                 // Create wrapper for tile content (to separate bg highlight from moving tile)
                 const tileWrapper = document.createElement('div');

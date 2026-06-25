@@ -93,6 +93,13 @@ fn tile_type(tid: Option<u8>) -> u8 {
     }
 }
 
+fn is_red(tid: Option<u8>) -> bool {
+    match tid {
+        Some(t) => t % 4 == 0,
+        None => false,
+    }
+}
+
 fn find_matching_action(legal: &[Action], target: &Action) -> Option<Action> {
     match target.action_type {
         ActionType::Tsumo | ActionType::Ron => legal
@@ -103,13 +110,27 @@ fn find_matching_action(legal: &[Action], target: &Action) -> Option<Action> {
             .iter()
             .find(|a| a.action_type == ActionType::Kita)
             .cloned(),
-        ActionType::Discard | ActionType::Riichi => legal
-            .iter()
-            .find(|a| {
-                a.action_type == target.action_type
-                    && tile_type(a.tile) == tile_type(target.tile)
-            })
-            .cloned(),
+        ActionType::Discard | ActionType::Riichi => {
+            let exact = legal
+                .iter()
+                .find(|a| {
+                    a.action_type == target.action_type
+                        && tile_type(a.tile) == tile_type(target.tile)
+                        && is_red(a.tile) == is_red(target.tile)
+                })
+                .cloned();
+            if exact.is_some() {
+                exact
+            } else {
+                legal
+                    .iter()
+                    .find(|a| {
+                        a.action_type == target.action_type
+                            && tile_type(a.tile) == tile_type(target.tile)
+                    })
+                    .cloned()
+            }
+        }
         _ => legal
             .iter()
             .find(|a| {
@@ -693,5 +714,125 @@ mod tests {
         let obs = state.get_observation(0);
         let encoded = obs.encode_to_vec();
         assert_eq!(encoded.len(), 182 * 27);
+    }
+
+    fn make_state_for_kita_test() -> GameState3P {
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        state.wall.drawable_count = 20;
+        state
+    }
+
+    #[test]
+    fn kita_non_riichi_generates_action_per_north_in_hand() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = false;
+        state.players[pid as usize].hand = vec![0, 36, 72, 120, 121, 122, 84];
+        state.drawn_tile = Some(3);
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert_eq!(actions.len(), 3);
+        assert!(actions.iter().all(|a| a.action_type == ActionType::Kita));
+        let tiles: std::collections::HashSet<u8> =
+            actions.iter().map(|a| a.tile.unwrap()).collect();
+        assert!(tiles.contains(&120));
+        assert!(tiles.contains(&121));
+        assert!(tiles.contains(&122));
+    }
+
+    #[test]
+    fn kita_non_riichi_no_north_in_hand_yields_empty() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = false;
+        state.players[pid as usize].hand = vec![0, 4, 36, 40, 72, 76, 84];
+        state.drawn_tile = Some(3);
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn kita_riichi_drawn_north_allows_single_kita() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = true;
+        state.players[pid as usize].hand = vec![0, 36, 120, 121, 72, 84, 88];
+        state.drawn_tile = Some(122);
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].action_type, ActionType::Kita);
+        assert_eq!(actions[0].tile, Some(122));
+    }
+
+    #[test]
+    fn kita_riichi_drawn_not_north_blocks_kita_even_with_north_in_hand() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = true;
+        state.players[pid as usize].hand = vec![0, 36, 120, 121, 122, 72, 84];
+        state.drawn_tile = Some(3);
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn kita_riichi_north_pair_in_hand_drawn_other_blocked() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = true;
+        state.players[pid as usize].hand = vec![0, 36, 120, 121, 72, 76, 80];
+        state.drawn_tile = Some(84);
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn kita_no_drawn_tile_yields_empty() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = false;
+        state.players[pid as usize].hand = vec![0, 120, 121];
+        state.drawn_tile = None;
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn kita_wall_exhausted_yields_empty() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = false;
+        state.players[pid as usize].hand = vec![0, 120, 121];
+        state.drawn_tile = Some(3);
+        state.wall.drawable_count = 0;
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn kita_riichi_drawn_north_not_in_hand_still_allows() {
+        let mut state = make_state_for_kita_test();
+        let pid = state.current_player;
+        state.players[pid as usize].riichi_declared = true;
+        state.players[pid as usize].hand = vec![0, 36, 72, 84, 88, 92, 96];
+        state.drawn_tile = Some(120);
+
+        let actions = state.get_kita_legal_actions(pid);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].action_type == ActionType::Kita && actions[0].tile == Some(120), true);
     }
 }

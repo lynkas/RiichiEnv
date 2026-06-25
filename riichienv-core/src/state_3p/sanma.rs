@@ -157,11 +157,17 @@ impl GameState3P {
         let p_idx = pid as usize;
         let mut actions = Vec::new();
 
-        // Find North tiles (type 30, IDs 120-123) in hand
-        for &tile in &self.players[p_idx].hand {
-            if tile / 4 == 30 {
-                // North wind
-                actions.push(Action::new(ActionType::Kita, Some(tile), vec![], Some(pid)));
+        if self.players[p_idx].riichi_declared {
+            if let Some(dt) = self.drawn_tile {
+                if dt / 4 == 30 {
+                    actions.push(Action::new(ActionType::Kita, Some(dt), vec![], Some(pid)));
+                }
+            }
+        } else {
+            for &tile in &self.players[p_idx].hand {
+                if tile / 4 == 30 {
+                    actions.push(Action::new(ActionType::Kita, Some(tile), vec![], Some(pid)));
+                }
             }
         }
 

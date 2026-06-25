@@ -186,6 +186,45 @@ export class RiichiViewer {
         return [...this._viewer.gameState.getState().playerNames];
     }
 
+    // Public API (decoupling business layer from internal _viewer)
+    getPlayerCount(): number {
+        return this._viewer.gameState.config.playerCount;
+    }
+
+    getBoardState() {
+        return this._viewer.gameState.current;
+    }
+
+    getOwnHand(seat: number): { hand: string[]; lastDrawnTile?: string } {
+        const p = this._viewer.gameState.current.players[seat];
+        return { hand: p.hand, lastDrawnTile: p.lastDrawnTile };
+    }
+
+    seekToEnd(): void {
+        const gs = this._viewer.gameState;
+        gs.jumpTo(gs.events.length);
+        this._viewer.update();
+    }
+
+    appendEvents(events: any[]): void {
+        const gs = this._viewer.gameState;
+        for (const ev of events) {
+            if (ev && ev.type !== 'start_game' && ev.type !== 'end_game') gs.events.push(ev);
+        }
+        gs.kyokus = gs.getKyokuCheckpoints();
+        this.seekToEnd();
+    }
+
+    revealHands(seats: number[]): void {
+        this._viewer.renderer.revealedPlayers = new Set(seats);
+        this._viewer.update();
+    }
+
+    clearReveal(): void {
+        this._viewer.renderer.revealedPlayers = new Set();
+        this._viewer.update();
+    }
+
     // Analysis
     getKyokuSummaries(): KyokuSummary[] {
         return computeKyokuSummaries(this._viewer.gameState);

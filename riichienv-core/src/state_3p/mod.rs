@@ -36,6 +36,10 @@ pub struct HoraSnapshot {
     pub ura_indicator_tiles: [u8; 5],
     pub win_honba_bonus: u32,
     pub win_riichi_stick_bonus: u32,
+    pub dora_count: u32,
+    pub aka_dora: u32,
+    pub ura_dora_count: u32,
+    pub nukidora_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1889,6 +1893,10 @@ impl GameState3P {
                 "deltas".to_string(),
                 serde_json::to_value(deltas).expect("valid JSON"),
             );
+            ev.insert(
+                "tenpais".to_string(),
+                serde_json::to_value(&tenpai).expect("valid JSON"),
+            );
             self._push_mjai_event(Value::Object(ev));
         }
 
@@ -1970,6 +1978,71 @@ impl GameState3P {
 
     fn save_hora_snapshot(&mut self, actor: u8) {
         let p = &self.players[actor as usize];
+
+        let mut full_counts = [0u8; 34];
+        for &t in &p.hand {
+            full_counts[(t / 4) as usize] += 1;
+        }
+        for meld in &p.melds {
+            for &t in &meld.tiles {
+                full_counts[(t / 4) as usize] += 1;
+            }
+        }
+        let hand_only = p.hand.len() as u8;
+        let num_melds = p.melds.len() as u8;
+        let current_total = hand_only + 3 * num_melds;
+        let mut win_tile_for_aka: Option<u8> = None;
+        if current_total == 13 {
+            if let Some((_, tile)) = self.last_discard {
+                full_counts[(tile / 4) as usize] += 1;
+                win_tile_for_aka = Some(tile);
+            }
+        }
+
+        let get_next = crate::hand_evaluator_3p::get_next_tile_sanma;
+
+        let mut dora_count = 0u32;
+        for &indicator in &self.wall.dora_indicators {
+            let next_tile_34 = get_next(indicator / 4);
+            dora_count += full_counts[next_tile_34 as usize] as u32;
+            if next_tile_34 == 30 {
+                dora_count += p.kita_tiles.len() as u32;
+            }
+        }
+
+        let mut aka_dora = 0u32;
+        for &t in &p.hand {
+            if t == 16 || t == 52 || t == 88 {
+                aka_dora += 1;
+            }
+        }
+        for meld in &p.melds {
+            for &t in &meld.tiles {
+                if t == 16 || t == 52 || t == 88 {
+                    aka_dora += 1;
+                }
+            }
+        }
+        if let Some(t) = win_tile_for_aka {
+            if t == 16 || t == 52 || t == 88 {
+                aka_dora += 1;
+            }
+        }
+
+        let mut ura_dora_count = 0u32;
+        if p.riichi_declared {
+            for i in 0..self.wall.dora_indicators.len() {
+                let indicator = self.wall.ura_indicator_tiles[i];
+                let next_tile_34 = get_next(indicator / 4);
+                ura_dora_count += full_counts[next_tile_34 as usize] as u32;
+                if next_tile_34 == 30 {
+                    ura_dora_count += p.kita_tiles.len() as u32;
+                }
+            }
+        }
+
+        let nukidora_count = p.kita_tiles.len() as u32;
+
         let snap = HoraSnapshot {
             hand: p.hand.clone(),
             melds: p.melds.clone(),
@@ -1981,6 +2054,10 @@ impl GameState3P {
             ura_indicator_tiles: self.wall.ura_indicator_tiles,
             win_honba_bonus: self.win_honba_bonus.get(&actor).copied().unwrap_or(0),
             win_riichi_stick_bonus: self.win_riichi_stick_bonus.get(&actor).copied().unwrap_or(0),
+            dora_count,
+            aka_dora,
+            ura_dora_count,
+            nukidora_count,
         };
         self.last_hora_snapshots.insert(actor, snap);
     }
@@ -2027,7 +2104,7 @@ impl GameState3P {
             });
 
         let open_downgrade: std::collections::HashMap<u32, u32> =
-            [(15, 1), (16, 1), (17, 1), (26, 2), (27, 2), (28, 2), (29, 5)]
+            [(15, 1), (16, 1), (17, 1), (26, 1), (27, 1), (29, 1)]
                 .iter()
                 .cloned()
                 .collect();
@@ -2078,7 +2155,6 @@ impl GameState3P {
         }
 
         if !is_yakuman {
-            let residual = total_han.saturating_sub(fixed_total);
             let dora_entries: Vec<usize> = yakus
                 .iter()
                 .enumerate()
@@ -2086,16 +2162,31 @@ impl GameState3P {
                 .map(|(i, _)| i)
                 .collect();
             if !dora_entries.is_empty() {
-                let base = residual / dora_entries.len() as u32;
-                let mut extra = residual - base * dora_entries.len() as u32;
-                for &idx in &dora_entries {
-                    let fan = base + if extra > 0 {
-                        extra -= 1;
-                        1
-                    } else {
-                        0
-                    };
-                    yakus[idx].fan = fan as i32;
+                if let Some(snap) = snap {
+                    for &idx in &dora_entries {
+                        let yid = yakus[idx].id;
+                        let count = match yid {
+                            ID_DORA => snap.dora_count,
+                            ID_AKADORA => snap.aka_dora,
+                            ID_URADORA => snap.ura_dora_count,
+                            ID_NUKIDORA => snap.nukidora_count,
+                            _ => 0,
+                        };
+                        yakus[idx].fan = count as i32;
+                    }
+                } else {
+                    let residual = total_han.saturating_sub(fixed_total);
+                    let base = residual / dora_entries.len() as u32;
+                    let mut extra = residual - base * dora_entries.len() as u32;
+                    for &idx in &dora_entries {
+                        let fan = base + if extra > 0 {
+                            extra -= 1;
+                            1
+                        } else {
+                            0
+                        };
+                        yakus[idx].fan = fan as i32;
+                    }
                 }
             }
         } else {

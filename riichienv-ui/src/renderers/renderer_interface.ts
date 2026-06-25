@@ -22,4 +22,7 @@ export interface IRenderer {
 
     /** Optional: resize the rendered board to fit a given width. */
     resize?(width: number): void;
+
+    /** Optional: set of player seats whose hands should be revealed (open). */
+    revealedPlayers?: Set<number>;
 }

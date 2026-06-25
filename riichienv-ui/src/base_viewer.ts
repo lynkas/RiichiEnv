@@ -82,7 +82,7 @@ export abstract class BaseViewer {
             overflow: 'hidden',
             display: 'flex',
             justifyContent: 'center',
-            alignItems: 'flex-start',
+            alignItems: 'center',
             backgroundColor: '#000',
         });
         container.appendChild(scrollContainer);
@@ -263,90 +263,8 @@ export abstract class BaseViewer {
     }
 
     private setupControls(rightSidebar: HTMLElement) {
-        if (!this.isFrozen) {
-            // Left options box (Debug + Auto)
-            const optionsBox = document.createElement('div');
-            Object.assign(optionsBox.style, {
-                position: 'absolute',
-                left: '10px',
-                bottom: '20%',
-                backgroundColor: 'rgba(0,0,0,0.65)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px',
-                padding: '10px',
-                alignItems: 'center',
-                zIndex: '500',
-                borderRadius: '10px',
-                backdropFilter: 'blur(4px)',
-            });
-
-            const logWrapper = this.createLabeledBtn('btn-log', ICON_EYE, 'Debug');
-            // Re-wire click to use the actual btn for toggle state
-            const logBtn = logWrapper.querySelector('.icon-btn') as HTMLElement;
-            logWrapper.onclick = (e) => {
-                e.stopPropagation();
-                this.controller.toggleLog(logBtn, this.debugPanel);
-            };
-            optionsBox.appendChild(logWrapper);
-
-            const autoWrapper = this.createLabeledBtn('btn-auto', ICON_PLAY_PAUSE, 'Auto');
-            const autoBtn = autoWrapper.querySelector('.icon-btn') as HTMLElement;
-            autoWrapper.onclick = (e) => {
-                e.stopPropagation();
-                this.controller.toggleAutoPlay(autoBtn);
-            };
-            optionsBox.appendChild(autoWrapper);
-
-            this.viewArea.appendChild(optionsBox);
-
-            // Right sidebar (navigation only)
-            const createRowLabel = (text: string): HTMLElement => {
-                const lbl = document.createElement('div');
-                Object.assign(lbl.style, {
-                    fontSize: '13px',
-                    color: '#aaa',
-                    fontFamily: 'sans-serif',
-                    whiteSpace: 'nowrap',
-                    paddingRight: '4px',
-                });
-                lbl.textContent = text;
-                return lbl;
-            };
-
-            rightSidebar.appendChild(createRowLabel('Round'));
-            const btnPKyoku = this.createBtn('btn-pkyoku', ICON_CHEVRON_DOUBLE_LEFT, 'Prev Kyoku');
-            btnPKyoku.onclick = () => this.controller.prevKyoku();
-            rightSidebar.appendChild(btnPKyoku);
-            const btnNKyoku = this.createBtn('btn-nkyoku', ICON_CHEVRON_DOUBLE_RIGHT, 'Next Kyoku');
-            btnNKyoku.onclick = () => this.controller.nextKyoku();
-            rightSidebar.appendChild(btnNKyoku);
-
-            rightSidebar.appendChild(createRowLabel('Turn'));
-            const btnPTurn = this.createBtn('btn-pturn', ICON_ARROW_LEFT, 'Prev Turn');
-            btnPTurn.onclick = () => this.controller.prevTurn();
-            rightSidebar.appendChild(btnPTurn);
-            const btnNTurn = this.createBtn('btn-nturn', ICON_ARROW_RIGHT, 'Next Turn');
-            btnNTurn.onclick = () => this.controller.nextTurn();
-            rightSidebar.appendChild(btnNTurn);
-
-            rightSidebar.appendChild(createRowLabel('Step'));
-            const btnPrev = this.createBtn('btn-prev', ICON_CHEVRON_LEFT, 'Prev Step');
-            btnPrev.onclick = () => this.controller.stepBackward();
-            rightSidebar.appendChild(btnPrev);
-            const btnNext = this.createBtn('btn-next', ICON_CHEVRON_RIGHT, 'Next Step');
-            btnNext.onclick = () => this.controller.stepForward();
-            rightSidebar.appendChild(btnNext);
-
-            this.controller = new ReplayController(this);
-            this.controller.setupKeyboardControls(this.viewArea);
-            this.controller.setupWheelControls(this.viewArea);
-
-            this.viewArea.addEventListener('mouseenter', () => this.viewArea.focus());
-            this.viewArea.addEventListener('click', () => this.viewArea.focus());
-        } else {
-            rightSidebar.style.display = 'none';
-        }
+        rightSidebar.style.display = 'none';
+        this.controller = new ReplayController(this);
     }
 
     private setupInitialSeek(initialStep?: number) {
@@ -360,7 +278,7 @@ export abstract class BaseViewer {
         const doResize = (availableW: number) => {
             const availableH = window.innerHeight;
             if (availableW === 0) return;
-            const scale = Math.min(availableW / baseW, availableH / baseH, 1.0);
+            const scale = Math.min(availableW / baseW, availableH / baseH);
             contentWrapper.style.transform = `scale(${scale})`;
             scaleWrapper.style.width = `${Math.floor(baseW * scale)}px`;
             scaleWrapper.style.height = `${Math.floor(baseH * scale)}px`;
@@ -378,18 +296,6 @@ export abstract class BaseViewer {
     }
 
     private setupRendererCallbacks() {
-        if (!this.isFrozen) {
-            this.renderer.onViewpointChange = (pIdx: number) => {
-                if (this.renderer.viewpoint !== pIdx) {
-                    this.renderer.viewpoint = pIdx;
-                    this.update();
-                    this.onViewpointChangeCallback?.(pIdx);
-                }
-            };
-            this.renderer.onCenterClick = () => {
-                this.showRoundSelector();
-            };
-        }
     }
 
     showRoundSelector() {
