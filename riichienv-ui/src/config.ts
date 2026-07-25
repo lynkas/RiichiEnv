@@ -124,6 +124,8 @@ export interface LayoutConfig3D {
     tiltAngle: number;
     /** Hand layer height at bottom of viewport in px. */
     handLayerHeight: number;
+    /** Center info panel size in px (square, default 250). */
+    centerInfoSize: number;
     /** Tile dimensions [width, height] per rendering context. */
     tileSizes: {
         riverTile: [number, number];
@@ -145,6 +147,7 @@ export function createLayout3DConfig4P(): LayoutConfig3D {
         perspective: 1800 /** **/,
         tiltAngle: 48 /** **/,
         handLayerHeight: 144,
+        centerInfoSize: 250,
         tileSizes: {
             riverTile: [26, 36],
             opponentTile: [30, 42],
@@ -157,6 +160,28 @@ export function createLayout3DConfig4P(): LayoutConfig3D {
 }
 
 export function createLayout3DConfig3P(): LayoutConfig3D {
+    const portrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+    if (portrait) {
+        return {
+            viewAreaWidth: 720,
+            viewAreaHeight: 720,
+            contentWidth: 720,
+            contentHeight: 720,
+            tableSize: 760,
+            perspective: 1500,
+            tiltAngle: 35,
+            handLayerHeight: 0,
+            centerInfoSize: 150,
+            tileSizes: {
+                riverTile: [26, 36],
+                opponentTile: [30, 42],
+                ownTile: [60, 84],
+                doraTile: [28, 39],
+                meldTileTable: [20, 28],
+                meldTileOwn: [48, 67],
+            },
+        };
+    }
     return {
         viewAreaWidth: 1280,
         viewAreaHeight: 720,
@@ -166,6 +191,7 @@ export function createLayout3DConfig3P(): LayoutConfig3D {
         perspective: 1800,
         tiltAngle: 48,
         handLayerHeight: 144,
+        centerInfoSize: 250,
         tileSizes: {
             riverTile: [26, 36],
             opponentTile: [30, 42],
