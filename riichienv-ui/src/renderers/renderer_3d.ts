@@ -578,17 +578,31 @@ export class Renderer3D implements IRenderer {
         const ts = this.layout.tableSize;
         const centerHalf = (this.layout.centerInfoSize || 250) / 2;
         const k = (centerHalf * 2) / 250;
-        // Four-way symmetric: every score's center sits scoreMargin inside the
-        // corresponding panel edge, center-anchored so rotate/scale(k) pivot on
-        // that point (zero drift at any k). Worst case text is 6 monospace
-        // chars (24px font, 0.6em advance => 14.4px/char, half-width 43.2k)
-        // for the 90deg-rotated side scores: the outer text edge reaches
-        // (80 + 43.2)k = 123.2k, staying 1.8k inside the panel edge (125k) and
-        // 4.8k clear of the riichi stick (inner edge 128k). Top/bottom scores
-        // only extend half their height (14.4k) radially, so they clear both
-        // with wide margin.
+        // Top/bottom scores keep the four-way symmetric margin. Worst case
+        // text is 6 monospace chars (24px font, 0.6em advance => 14.4px/char).
+        // Measured element box: 72x28px for 5 chars, so the radial half-extent
+        // is half the LINE HEIGHT (14k, +3k text-shadow), not the text width:
+        // for the 90deg-rotated side scores the text width extends tangentially
+        // along the panel edge. Radial band for top/bottom: [65.6k, 94.4k],
+        // staying well inside the panel edge (125k) and clear of sticks/rivers.
         const scoreMargin = 45 * k;
         const scoreDist = centerHalf - scoreMargin; // 80 at k=1
+
+        // Side scores sit farther out for visual balance: with the common
+        // 5-char score (tangential half-width 36k), the text-side edge facing
+        // center lands at 102k - 36k = 66k, flush with the top/bottom scores'
+        // inner edge (65.6k). Real radial band is [88k, 116k+shadow], still
+        // 9k+ clear of the riichi stick (inner edge 128k) for any char count,
+        // so sticks stay at the symmetric 131k and never need to move.
+        const sideScoreMargin = 23 * k;
+        let sideScoreDist = centerHalf - sideScoreMargin; // 102 at k=1
+        // Cap by river clearance: the side river's inner edge is
+        // (ts*0.73 - th) - riverH*scale/2 from the table edge (see
+        // renderRiver3D); in compact portrait layouts it sits much closer to
+        // the center, so keep a 4k gap beyond the 17k radial half-extent.
+        const th = this.layout.tileSizes.riverTile[1];
+        const riverInner = ts * 0.73 - th - ts / 2 - ((3 * th + 2) * 1.35) / 2;
+        sideScoreDist = Math.min(sideScoreDist, riverInner - 21 * k);
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
@@ -611,9 +625,11 @@ export class Renderer3D implements IRenderer {
                 { dx: -1, dy: 0, transform: left },
             ];
             const d = dirs[relPos];
+            // Side scores (left/right) use the pushed-out distance
+            const dist = relPos % 2 === 1 ? sideScoreDist : scoreDist;
             Object.assign(el.style, {
-                left: `${Math.round(ts / 2 + scoreDist * d.dx)}px`,
-                top: `${Math.round(ts / 2 + scoreDist * d.dy)}px`,
+                left: `${Math.round(ts / 2 + dist * d.dx)}px`,
+                top: `${Math.round(ts / 2 + dist * d.dy)}px`,
                 transform: d.transform,
             });
 
