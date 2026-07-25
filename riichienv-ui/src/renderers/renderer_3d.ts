@@ -614,6 +614,7 @@ export class Renderer3D implements IRenderer {
         const s5 = 5 * k;
         const s10 = 10 * k;
         const s15 = 15 * k;
+        const heightComp = (1 - k) * 50;
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
@@ -633,7 +634,7 @@ export class Renderer3D implements IRenderer {
                     Object.assign(el.style, {
                         left: '50%',
                         top: `${nearEdge - s15 - offset - s10}px`,
-                        transform: `translateX(-50%) scale(${k})`,
+                        transform: `translateX(-50%) translateY(${heightComp}%) scale(${k})`,
                     });
                 } else if (relPos === 1) {
                     Object.assign(el.style, {
@@ -645,7 +646,7 @@ export class Renderer3D implements IRenderer {
                     Object.assign(el.style, {
                         left: '50%',
                         top: `${farEdge + offset - s10}px`,
-                        transform: `translateX(-50%) rotate(180deg) scale(${k})`,
+                        transform: `translateX(-50%) rotate(180deg) translateY(${heightComp}%) scale(${k})`,
                     });
                 }
             } else {
@@ -653,7 +654,7 @@ export class Renderer3D implements IRenderer {
                     Object.assign(el.style, {
                         left: '50%',
                         top: `${nearEdge - s15 - offset - s10}px`,
-                        transform: `translateX(-50%) scale(${k})`,
+                        transform: `translateX(-50%) translateY(${heightComp}%) scale(${k})`,
                     });
                 } else if (relPos === 1) {
                     Object.assign(el.style, {
@@ -665,7 +666,7 @@ export class Renderer3D implements IRenderer {
                     Object.assign(el.style, {
                         left: '50%',
                         top: `${farEdge + offset - s10}px`,
-                        transform: `translateX(-50%) rotate(180deg) scale(${k})`,
+                        transform: `translateX(-50%) rotate(180deg) translateY(${heightComp}%) scale(${k})`,
                     });
                 } else if (relPos === 3) {
                     Object.assign(el.style, {
