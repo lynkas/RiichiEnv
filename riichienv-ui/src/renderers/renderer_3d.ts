@@ -179,8 +179,9 @@ export class Renderer3D implements IRenderer {
 
         const tableSurface = document.createElement('div');
         tableSurface.className = 'table-surface';
-        // Position: flatter tilt → move table up to balance with hand layer
-        const tableTop = this.layout.tiltAngle <= 40 ? '40%' : '42%';
+        // Position: no tilt → centered (top-down); flatter tilt → move table up
+        // to balance with hand layer
+        const tableTop = this.layout.tiltAngle === 0 ? '50%' : this.layout.tiltAngle <= 40 ? '40%' : '42%';
         const frameWidth = 76;
         const surfaceSize = this.layout.tableSize + frameWidth * 2;
         Object.assign(tableSurface.style, {
@@ -969,11 +970,16 @@ export class Renderer3D implements IRenderer {
 
         const wrapper = document.createElement('div');
         wrapper.className = 'opp-hand-3d';
-        // Position at bottom edge (relIndex=0), right-aligned
+        // Position at bottom edge (relIndex=0), right-aligned.
+        // The wrapper is 680px wide; cap the rightward shift so its right edge
+        // stays 30px inside the table edge — the portrait square view clips
+        // 20px of felt on each side and rotated called-tiles protrude ~6px
+        // past the wrapper, so anything further right renders off-screen.
+        const meldDx = Math.max(0, Math.min(60, ts / 2 - 370));
         Object.assign(wrapper.style, {
             left: '50%',
             top: `${Math.round((ts * 0.745 - rth + halfRiverExtent + ts) / 2)}px`,
-            transform: 'translate(calc(-50% + 60px), calc(-50% + 30px))',
+            transform: `translate(calc(-50% + ${meldDx}px), calc(-50% + 30px))`,
             justifyContent: 'flex-end',
         });
 

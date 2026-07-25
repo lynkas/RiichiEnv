@@ -171,7 +171,10 @@ export function createLayout3DConfig3P(): LayoutConfig3D {
             contentHeight: 720,
             tableSize: 760,
             perspective: 1500,
-            tiltAngle: 35,
+            // Portrait: pure top-down view. Any tilt here is magnified by the
+            // perspective projection at the near (bottom) table edge and pushes
+            // content outside the square view area on 600-928px wide screens.
+            tiltAngle: 0,
             handLayerHeight: 0,
             centerInfoSize: 225,
             // Panel half grew 75 -> 112.5 (+37.5); push rivers out by the
