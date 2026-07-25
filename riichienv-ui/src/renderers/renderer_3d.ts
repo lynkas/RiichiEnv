@@ -534,16 +534,23 @@ export class Renderer3D implements IRenderer {
     // =========================================================================
     private renderRiichiSticks(table: HTMLElement, state: BoardState, pc: number): void {
         const ts = this.layout.tableSize;
-        // Four-way symmetric placement: every stick sits just OUTSIDE the
-        // center panel edge, at the same radial distance in all directions.
-        // Center-anchored (translate(-50%,-50%) before rotate/scale) so the
-        // visual center is exactly stickDist from the panel center and scale(k)
-        // pivots on that point with zero drift. Stick = 80x6, so half-thickness
-        // is 3k after scaling.
+        // Four-way symmetric placement INSIDE the center panel: every stick
+        // sits at the same radial distance in all directions, center-anchored
+        // (translate(-50%,-50%) before rotate/scale) so scale(k) pivots on
+        // that point with zero drift. Stick = 72x5 => band [91k, 96k].
+        //
+        // Why inside: the gap between panel edge (125k) and the rivers is not
+        // usable space. River tiles are 3D boxes whose top faces sit 26px
+        // above the table plane; under the rotateX tilt + perspective they
+        // project toward the table center, visually reaching ~102-119k
+        // (measured: land bottom 106.7k, land top 109.1k, land side 118.7k,
+        // port bottom 101.9k, port top ~125k). In portrait the river wrapper
+        // even overlaps the stick band in plan view. Inside the panel the
+        // panel edge itself separates sticks from the rivers.
         const centerHalf = (this.layout.centerInfoSize || 250) / 2;
         const k = (centerHalf * 2) / 250;
-        const stickGap = 3 * k; // gap between panel edge and stick inner edge
-        const stickDist = centerHalf + stickGap + 3 * k; // 131 at k=1
+        const stickInset = 31.5 * k; // panel edge to stick center
+        const stickDist = centerHalf - stickInset; // 93.5 at k=1
         // relPos: 0=bottom, 1=right, 2=top, 3=left (3P has no left)
         const dirs = [
             { dx: 0, dy: 1, rot: '' },
@@ -578,31 +585,16 @@ export class Renderer3D implements IRenderer {
         const ts = this.layout.tableSize;
         const centerHalf = (this.layout.centerInfoSize || 250) / 2;
         const k = (centerHalf * 2) / 250;
-        // Top/bottom scores keep the four-way symmetric margin. Worst case
-        // text is 6 monospace chars (24px font, 0.6em advance => 14.4px/char).
-        // Measured element box: 72x28px for 5 chars, so the radial half-extent
-        // is half the LINE HEIGHT (14k, +3k text-shadow), not the text width:
-        // for the 90deg-rotated side scores the text width extends tangentially
-        // along the panel edge. Radial band for top/bottom: [65.6k, 94.4k],
-        // staying well inside the panel edge (125k) and clear of sticks/rivers.
-        const scoreMargin = 45 * k;
-        const scoreDist = centerHalf - scoreMargin; // 80 at k=1
-
-        // Side scores sit farther out for visual balance: with the common
-        // 5-char score (tangential half-width 36k), the text-side edge facing
-        // center lands at 102k - 36k = 66k, flush with the top/bottom scores'
-        // inner edge (65.6k). Real radial band is [88k, 116k+shadow], still
-        // 9k+ clear of the riichi stick (inner edge 128k) for any char count,
-        // so sticks stay at the symmetric 131k and never need to move.
-        const sideScoreMargin = 23 * k;
-        let sideScoreDist = centerHalf - sideScoreMargin; // 102 at k=1
-        // Cap by river clearance: the side river's inner edge is
-        // (ts*0.73 - th) - riverH*scale/2 from the table edge (see
-        // renderRiver3D); in compact portrait layouts it sits much closer to
-        // the center, so keep a 4k gap beyond the 17k radial half-extent.
-        const th = this.layout.tileSizes.riverTile[1];
-        const riverInner = ts * 0.73 - th - ts / 2 - ((3 * th + 2) * 1.35) / 2;
-        sideScoreDist = Math.min(sideScoreDist, riverInner - 21 * k);
+        // Four-way symmetric placement: scores sit inside the panel between
+        // the center content and the riichi sticks, at the same radial
+        // distance in all directions. Worst-case radial half-extent is half
+        // the LINE HEIGHT (14k, +3k text-shadow): for the 90deg-rotated side
+        // scores the text width extends tangentially along the panel edge.
+        // Band [52.6k, 87.4k]: clears the center content (reaches 57.9k above
+        // / 52.1k below; glyphs are ~10k smaller than the line-height box) and
+        // the riichi sticks (inner edge 91k).
+        const scoreMargin = 55 * k;
+        const scoreDist = centerHalf - scoreMargin; // 70 at k=1
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
@@ -625,11 +617,9 @@ export class Renderer3D implements IRenderer {
                 { dx: -1, dy: 0, transform: left },
             ];
             const d = dirs[relPos];
-            // Side scores (left/right) use the pushed-out distance
-            const dist = relPos % 2 === 1 ? sideScoreDist : scoreDist;
             Object.assign(el.style, {
-                left: `${Math.round(ts / 2 + dist * d.dx)}px`,
-                top: `${Math.round(ts / 2 + dist * d.dy)}px`,
+                left: `${Math.round(ts / 2 + scoreDist * d.dx)}px`,
+                top: `${Math.round(ts / 2 + scoreDist * d.dy)}px`,
                 transform: d.transform,
             });
 

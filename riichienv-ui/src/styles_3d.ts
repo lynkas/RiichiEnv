@@ -296,10 +296,10 @@ export const VIEWER_3D_CSS = `
     /* Riichi sticks on table */
     .riichi-stick-3d {
         position: absolute;
-        width: 80px;
-        height: 6px;
+        width: 72px;
+        height: 5px;
         background: white;
-        border-radius: 3px;
+        border-radius: 2.5px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.4);
         z-index: 6;
         transform-style: preserve-3d;
