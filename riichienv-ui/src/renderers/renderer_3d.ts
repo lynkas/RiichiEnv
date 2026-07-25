@@ -389,6 +389,13 @@ export class Renderer3D implements IRenderer {
     private renderCenter3D(state: BoardState): HTMLElement {
         const center = document.createElement('div');
         center.className = 'center-info-3d';
+        const cis = this.layout.centerInfoSize || 250;
+        const k = cis / 250;
+        Object.assign(center.style, {
+            width: '250px',
+            height: '250px',
+            transform: `translate(-50%, -50%) scale(${k})`,
+        });
 
         const pc = state.playerCount || 4;
 
@@ -537,9 +544,11 @@ export class Renderer3D implements IRenderer {
             dot.className = 'dot';
             stick.appendChild(dot);
 
-            // Position just inside the edges of the center info panel (250x220, centered)
-            const centerHalf = 125; // half of 250px center panel width
-            const inset = 5;
+            // Position just inside the edges of the center info panel
+            const centerHalf = (this.layout.centerInfoSize || 250) / 2;
+            const k = (centerHalf * 2) / 250;
+            const inset = 5 * k;
+            const stickGap = 15 * k;
             const nearEdge = Math.round(ts / 2 + centerHalf - inset);
             const farEdge = Math.round(ts / 2 - centerHalf + inset);
             if (pc === 3) {
@@ -547,46 +556,46 @@ export class Renderer3D implements IRenderer {
                 if (relPos === 0) {
                     Object.assign(stick.style, {
                         left: '50%',
-                        top: `${nearEdge - 15}px`,
-                        transform: 'translateX(-50%)',
+                        top: `${nearEdge - stickGap}px`,
+                        transform: `translateX(-50%) scale(${k})`,
                     });
                 } else if (relPos === 1) {
                     Object.assign(stick.style, {
                         left: `${nearEdge}px`,
                         top: '50%',
-                        transform: 'translate(-50%, -50%) rotate(90deg)',
+                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
                     });
                 } else if (relPos === 2) {
                     Object.assign(stick.style, {
                         left: '50%',
                         top: `${farEdge}px`,
-                        transform: 'translateX(-50%)',
+                        transform: `translateX(-50%) scale(${k})`,
                     });
                 }
             } else {
                 if (relPos === 0) {
                     Object.assign(stick.style, {
                         left: '50%',
-                        top: `${nearEdge - 15}px`,
-                        transform: 'translateX(-50%)',
+                        top: `${nearEdge - stickGap}px`,
+                        transform: `translateX(-50%) scale(${k})`,
                     });
                 } else if (relPos === 1) {
                     Object.assign(stick.style, {
                         left: `${nearEdge}px`,
                         top: '50%',
-                        transform: 'translate(-50%, -50%) rotate(90deg)',
+                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
                     });
                 } else if (relPos === 2) {
                     Object.assign(stick.style, {
                         left: '50%',
                         top: `${farEdge}px`,
-                        transform: 'translateX(-50%)',
+                        transform: `translateX(-50%) scale(${k})`,
                     });
                 } else if (relPos === 3) {
                     Object.assign(stick.style, {
                         left: `${farEdge}px`,
                         top: '50%',
-                        transform: 'translate(-50%, -50%) rotate(90deg)',
+                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
                     });
                 }
             }
@@ -599,8 +608,12 @@ export class Renderer3D implements IRenderer {
     // =========================================================================
     private renderFloatingScores(table: HTMLElement, state: BoardState, pc: number): void {
         const ts = this.layout.tableSize;
-        const centerHalf = 125; // half of 250px center panel width
-        const offset = 30; // px above riichi stick (toward center)
+        const centerHalf = (this.layout.centerInfoSize || 250) / 2;
+        const k = (centerHalf * 2) / 250;
+        const offset = 30 * k; // px above riichi stick (toward center)
+        const s5 = 5 * k;
+        const s10 = 10 * k;
+        const s15 = 15 * k;
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
@@ -611,54 +624,54 @@ export class Renderer3D implements IRenderer {
 
             // Position above riichi stick, rotated to face the player
             // "above" = closer to center from the riichi stick position
-            const nearEdge = Math.round(ts / 2 + centerHalf - 5);
-            const farEdge = Math.round(ts / 2 - centerHalf + 5);
+            const nearEdge = Math.round(ts / 2 + centerHalf - s5);
+            const farEdge = Math.round(ts / 2 - centerHalf + s5);
 
             if (pc === 3) {
                 // 3P: 0=bottom, 1=right, 2=opposite (top)
                 if (relPos === 0) {
                     Object.assign(el.style, {
                         left: '50%',
-                        top: `${nearEdge - 15 - offset - 10}px`,
-                        transform: 'translateX(-50%)',
+                        top: `${nearEdge - s15 - offset - s10}px`,
+                        transform: `translateX(-50%) scale(${k})`,
                     });
                 } else if (relPos === 1) {
                     Object.assign(el.style, {
-                        left: `${nearEdge - offset + 15}px`,
+                        left: `${nearEdge - offset + s15}px`,
                         top: '50%',
-                        transform: 'translate(-50%, -50%) rotate(-90deg)',
+                        transform: `translate(-50%, -50%) rotate(-90deg) scale(${k})`,
                     });
                 } else if (relPos === 2) {
                     Object.assign(el.style, {
                         left: '50%',
-                        top: `${farEdge + offset - 10}px`,
-                        transform: 'translateX(-50%) rotate(180deg)',
+                        top: `${farEdge + offset - s10}px`,
+                        transform: `translateX(-50%) rotate(180deg) scale(${k})`,
                     });
                 }
             } else {
                 if (relPos === 0) {
                     Object.assign(el.style, {
                         left: '50%',
-                        top: `${nearEdge - 15 - offset - 10}px`,
-                        transform: 'translateX(-50%)',
+                        top: `${nearEdge - s15 - offset - s10}px`,
+                        transform: `translateX(-50%) scale(${k})`,
                     });
                 } else if (relPos === 1) {
                     Object.assign(el.style, {
-                        left: `${nearEdge - offset + 15}px`,
+                        left: `${nearEdge - offset + s15}px`,
                         top: '50%',
-                        transform: 'translate(-50%, -50%) rotate(-90deg)',
+                        transform: `translate(-50%, -50%) rotate(-90deg) scale(${k})`,
                     });
                 } else if (relPos === 2) {
                     Object.assign(el.style, {
                         left: '50%',
-                        top: `${farEdge + offset - 10}px`,
-                        transform: 'translateX(-50%) rotate(180deg)',
+                        top: `${farEdge + offset - s10}px`,
+                        transform: `translateX(-50%) rotate(180deg) scale(${k})`,
                     });
                 } else if (relPos === 3) {
                     Object.assign(el.style, {
-                        left: `${farEdge + offset - 15}px`,
+                        left: `${farEdge + offset - s15}px`,
                         top: '50%',
-                        transform: 'translate(-50%, -50%) rotate(90deg)',
+                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
                     });
                 }
             }
@@ -1157,6 +1170,7 @@ export class Renderer3D implements IRenderer {
         player.hand.forEach((t, idx) => {
             const tDiv = document.createElement('div');
             tDiv.className = 'own-tile-3d';
+            tDiv.dataset.pai = t;
             tDiv.appendChild(TileRenderer.getTileElement(t));
 
             // Tsumo tile separation
@@ -1243,30 +1257,34 @@ export class Renderer3D implements IRenderer {
         playerName.textContent = state.playerNames[playerIdx] || `P${playerIdx}`;
         panel.appendChild(playerName);
 
-        // Kita count badge
-        if (player.kitaCount > 0) {
-            const kitaBadge = document.createElement('div');
-            Object.assign(kitaBadge.style, {
-                fontSize: '11px',
-                color: '#fff',
-                background: 'rgba(120, 50, 180, 0.85)',
-                borderRadius: '4px',
-                padding: '1px 5px',
-                marginTop: '2px',
-                fontWeight: 'bold',
-                textAlign: 'center',
-            });
-            kitaBadge.textContent = `Pei ×${player.kitaCount}`;
-            panel.appendChild(kitaBadge);
+        // Kita count badge — always rendered with text (visibility:hidden when 0)
+        // to keep panel height constant and prevent layout shift
+        const kitaBadge = document.createElement('div');
+        Object.assign(kitaBadge.style, {
+            fontSize: '11px',
+            color: '#fff',
+            background: 'rgba(120, 50, 180, 0.85)',
+            borderRadius: '4px',
+            padding: '1px 5px',
+            marginTop: '2px',
+            fontWeight: 'bold',
+            textAlign: 'center',
+        });
+        kitaBadge.textContent = `Pei ×${player.kitaCount}`;
+        if (player.kitaCount === 0) {
+            kitaBadge.style.visibility = 'hidden';
         }
+        panel.appendChild(kitaBadge);
 
-        // Active player bar
-        if (playerIdx === state.currentActor) {
-            const bar = document.createElement('div');
-            bar.className = 'active-player-bar';
-            Object.assign(bar.style, { marginTop: '3px' });
-            panel.appendChild(bar);
+        // Active player bar — always rendered (visibility:hidden when inactive)
+        // to keep panel height constant and prevent layout shift
+        const bar = document.createElement('div');
+        bar.className = 'active-player-bar';
+        if (playerIdx !== state.currentActor) {
+            bar.style.visibility = 'hidden';
         }
+        Object.assign(bar.style, { marginTop: '3px' });
+        panel.appendChild(bar);
 
         // Click to change viewpoint
         panel.onclick = (e) => {
