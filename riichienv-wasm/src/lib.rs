@@ -360,13 +360,14 @@ pub fn tile_id_to_mjai(tid: u8) -> String {
 // ---------------------------------------------------------------------------
 
 #[wasm_bindgen]
-pub fn sanma_new_game(seed: u32) -> Result<JsValue, JsValue> {
+pub fn sanma_new_game(seed: u32, initial_oya: u8) -> Result<JsValue, JsValue> {
     let state = GameState3P::new(
         5,
         false,
         Some(seed as u64),
         0,
         GameRule::default_mjsoul(),
+        initial_oya,
     );
     GAME_STATE.with(|cell| {
         *cell.borrow_mut() = Some(state);
@@ -554,7 +555,7 @@ pub fn sanma_melds() -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn sanma_new_game_with_wall(wall_json: &str) -> Result<JsValue, JsValue> {
+pub fn sanma_new_game_with_wall(wall_json: &str, initial_oya: u8) -> Result<JsValue, JsValue> {
     let wall_tiles: Vec<u8> = serde_json::from_str(wall_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid wall JSON: {}", e)))?;
     if wall_tiles.len() != 108 {
@@ -566,6 +567,7 @@ pub fn sanma_new_game_with_wall(wall_json: &str) -> Result<JsValue, JsValue> {
         Some(0u64),
         0,
         GameRule::default_mjsoul(),
+        initial_oya,
     );
     let oya = state.oya;
     let round_wind = state.round_wind;
@@ -646,7 +648,7 @@ mod tests {
 
     #[test]
     fn sanma_new_game_creates_valid_state() {
-        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         assert!(!state.is_done);
         assert_eq!(state.active_players, vec![0]);
         assert_eq!(state.players.len(), 3);
@@ -655,14 +657,14 @@ mod tests {
 
     #[test]
     fn sanma_legal_actions_for_dealer() {
-        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         let actions = state._get_legal_actions_internal(0);
         assert!(!actions.is_empty());
     }
 
     #[test]
     fn sanma_step_discard() {
-        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         let actions = state._get_legal_actions_internal(0);
         let discard = actions
             .iter()
@@ -676,7 +678,7 @@ mod tests {
 
     #[test]
     fn sanma_scores_start_at_35000() {
-        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         for p in &state.players {
             assert_eq!(p.score, 35000);
         }
@@ -684,7 +686,7 @@ mod tests {
 
     #[test]
     fn sanma_hands_have_correct_tile_count() {
-        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         assert_eq!(state.players[state.oya as usize].hand.len(), 14);
         for (i, p) in state.players.iter().enumerate() {
             if i != state.oya as usize {
@@ -695,13 +697,13 @@ mod tests {
 
     #[test]
     fn sanma_mjai_log_has_events() {
-        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         assert!(!state.mjai_log.is_empty());
     }
 
     #[test]
     fn sanma_observation_serializes() {
-        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         let obs = state.get_observation(0);
         assert_eq!(obs.player_id, 0);
         let json = serde_json::to_value(&obs).unwrap();
@@ -710,14 +712,14 @@ mod tests {
 
     #[test]
     fn sanma_encode_returns_vector() {
-        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         let obs = state.get_observation(0);
         let encoded = obs.encode_to_vec();
         assert_eq!(encoded.len(), 182 * 27);
     }
 
     fn make_state_for_kita_test() -> GameState3P {
-        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul());
+        let mut state = GameState3P::new(5, false, Some(42), 0, GameRule::default_mjsoul(), 0);
         state.wall.drawable_count = 20;
         state
     }

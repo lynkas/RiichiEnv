@@ -23,6 +23,7 @@ impl GameStateVariant {
                 seed,
                 round_wind,
                 rule,
+                0,
             )))
         } else {
             GameStateVariant::FourPlayer(Box::new(GameState::new(

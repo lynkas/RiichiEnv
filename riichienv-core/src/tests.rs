@@ -708,7 +708,7 @@ mod unit_tests {
         use crate::replay::MjaiEvent;
 
         let mut state =
-            crate::state_3p::GameState3P::new(5, true, None, 0, crate::rule::GameRule::default());
+            crate::state_3p::GameState3P::new(5, true, None, 0, crate::rule::GameRule::default(), 0);
 
         assert_eq!(
             state.wall.tiles.len(),
@@ -764,7 +764,7 @@ mod unit_tests {
         use crate::replay::MjaiEvent;
 
         let mut state =
-            crate::state_3p::GameState3P::new(5, true, None, 0, crate::rule::GameRule::default());
+            crate::state_3p::GameState3P::new(5, true, None, 0, crate::rule::GameRule::default(), 0);
 
         state.wall.drawable_count = 1;
 
@@ -799,7 +799,7 @@ mod unit_tests {
         use crate::state_3p::legal_actions::GameState3PLegalActions;
 
         let mut state =
-            crate::state_3p::GameState3P::new(5, true, None, 0, crate::rule::GameRule::default());
+            crate::state_3p::GameState3P::new(5, true, None, 0, crate::rule::GameRule::default(), 0);
         state.wall.drawable_count = 0; // simulate exhausted prior round
 
         // 123p 456p 789p 123s E — discarding the tsumo'd South keeps tenpai
@@ -1035,6 +1035,7 @@ mod unit_tests {
             None,
             0,
             crate::rule::GameRule::default(),
+            0,
         )
     }
 

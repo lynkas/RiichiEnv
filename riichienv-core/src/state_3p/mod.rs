@@ -106,6 +106,7 @@ impl GameState3P {
         seed: Option<u64>,
         round_wind: u8,
         rule: GameRule,
+        initial_oya: u8,
     ) -> Self {
         let sub_mode = GameSubMode3P::from_game_mode(game_mode);
         let players = [(); NP].map(|_| PlayerState3P::new(game_mode::starting_score()));
@@ -162,7 +163,7 @@ impl GameState3P {
             state._push_mjai_event(Value::Object(ev));
         }
 
-        state._initialize_round(0, round_wind, 0, 0, None, None);
+        state._initialize_round(initial_oya, round_wind, 0, 0, None, None);
         state
     }
 

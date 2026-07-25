@@ -1130,7 +1130,7 @@ impl LogKyoku {
         let oya = oya_idx as u8;
 
         if is_3p {
-            let mut state = crate::state_3p::GameState3P::new(0, false, None, 0, rule);
+            let mut state = crate::state_3p::GameState3P::new(0, false, None, 0, rule, 0);
             let initial_scores: [i32; 3] = self.scores.clone().try_into().unwrap_or([35000; 3]);
 
             state._initialize_round(

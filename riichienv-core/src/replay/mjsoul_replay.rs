@@ -262,7 +262,7 @@ impl MjSoulReplay {
         let game_end_scores = if let Some(last) = rounds.last_mut() {
             if is_3p {
                 // For 3P, simulate using GameState3P
-                let mut state = crate::state_3p::GameState3P::new(0, false, None, 0, last.rule);
+                let mut state = crate::state_3p::GameState3P::new(0, false, None, 0, last.rule, 0);
                 let initial_scores: [i32; 3] = last.scores.clone().try_into().unwrap_or([35000; 3]);
                 let oya = last.ju % 3;
                 let bakaze = match last.chang {

@@ -537,7 +537,8 @@ export class Renderer3D implements IRenderer {
         // Four-way symmetric placement INSIDE the center panel: every stick
         // sits at the same radial distance in all directions, center-anchored
         // (translate(-50%,-50%) before rotate/scale) so scale(k) pivots on
-        // that point with zero drift. Stick = 72x5 => band [91k, 96k].
+        // that point with zero drift. Stick = 72x5 => band [102.5k, 107.5k],
+        // leaving a 17.5k margin to the panel edge.
         //
         // Why inside: the gap between panel edge (125k) and the rivers is not
         // usable space. River tiles are 3D boxes whose top faces sit 26px
@@ -549,8 +550,8 @@ export class Renderer3D implements IRenderer {
         // panel edge itself separates sticks from the rivers.
         const centerHalf = (this.layout.centerInfoSize || 250) / 2;
         const k = (centerHalf * 2) / 250;
-        const stickInset = 31.5 * k; // panel edge to stick center
-        const stickDist = centerHalf - stickInset; // 93.5 at k=1
+        const stickInset = 20 * k; // panel edge to stick center
+        const stickDist = centerHalf - stickInset; // 105 at k=1
         // relPos: 0=bottom, 1=right, 2=top, 3=left (3P has no left)
         const dirs = [
             { dx: 0, dy: 1, rot: '' },
@@ -590,11 +591,11 @@ export class Renderer3D implements IRenderer {
         // distance in all directions. Worst-case radial half-extent is half
         // the LINE HEIGHT (14k, +3k text-shadow): for the 90deg-rotated side
         // scores the text width extends tangentially along the panel edge.
-        // Band [52.6k, 87.4k]: clears the center content (reaches 57.9k above
+        // Band [65.5k, 99.5k]: clears the center content (reaches 57.9k above
         // / 52.1k below; glyphs are ~10k smaller than the line-height box) and
-        // the riichi sticks (inner edge 91k).
-        const scoreMargin = 55 * k;
-        const scoreDist = centerHalf - scoreMargin; // 70 at k=1
+        // hugs the riichi sticks (inner edge 102.5k) with a 3k gap.
+        const scoreMargin = 42.5 * k;
+        const scoreDist = centerHalf - scoreMargin; // 82.5 at k=1
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
