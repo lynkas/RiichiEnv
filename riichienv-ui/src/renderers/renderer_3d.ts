@@ -610,11 +610,16 @@ export class Renderer3D implements IRenderer {
         const ts = this.layout.tableSize;
         const centerHalf = (this.layout.centerInfoSize || 250) / 2;
         const k = (centerHalf * 2) / 250;
-        const offset = 30 * k; // px above riichi stick (toward center)
-        const s5 = 5 * k;
-        const s10 = 10 * k;
-        const s15 = 15 * k;
-        const heightComp = (1 - k) * 50;
+        // Center-anchored positioning: left/top mark the score's center point and
+        // translate(-50%,-50%) is applied first so rotate/scale(k) pivot on that
+        // same point (zero drift at any k). Offsets below are the k=1 (250px panel)
+        // center distances from the panel center, derived from the original
+        // edge-anchored formulas (panel half 125, inset 5, offset 30, margins
+        // 15/10/15) plus the element half-height 14.4 (24px font x ~1.2 line-height).
+        const halfH = 14.4;
+        const bottomDy = (125 - 5 - 15 - 30 - 10 + halfH) * k; // +79.4 at k=1
+        const topDy = -(125 - 5 - 30 + 10 - halfH) * k; // -85.6 at k=1
+        const sideDx = (125 - 5 - 30 + 15) * k; // 105 at k=1
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
@@ -625,57 +630,22 @@ export class Renderer3D implements IRenderer {
 
             // Position above riichi stick, rotated to face the player
             // "above" = closer to center from the riichi stick position
-            const nearEdge = Math.round(ts / 2 + centerHalf - s5);
-            const farEdge = Math.round(ts / 2 - centerHalf + s5);
+            const bottom = `translate(-50%, -50%) scale(${k})`;
+            const right = `translate(-50%, -50%) rotate(-90deg) scale(${k})`;
+            const top = `translate(-50%, -50%) rotate(180deg) scale(${k})`;
+            const left = `translate(-50%, -50%) rotate(90deg) scale(${k})`;
 
-            if (pc === 3) {
-                // 3P: 0=bottom, 1=right, 2=opposite (top)
-                if (relPos === 0) {
-                    Object.assign(el.style, {
-                        left: '50%',
-                        top: `${nearEdge - s15 - offset - s10}px`,
-                        transform: `translateX(-50%) translateY(${heightComp}%) scale(${k})`,
-                    });
-                } else if (relPos === 1) {
-                    Object.assign(el.style, {
-                        left: `${nearEdge - offset + s15}px`,
-                        top: '50%',
-                        transform: `translate(-50%, -50%) rotate(-90deg) scale(${k})`,
-                    });
-                } else if (relPos === 2) {
-                    Object.assign(el.style, {
-                        left: '50%',
-                        top: `${farEdge + offset - s10}px`,
-                        transform: `translateX(-50%) rotate(180deg) translateY(${heightComp}%) scale(${k})`,
-                    });
-                }
+            let style: { left: string; top: string; transform: string };
+            if (relPos === 0) {
+                style = { left: '50%', top: `${Math.round(ts / 2 + bottomDy)}px`, transform: bottom };
+            } else if (relPos === 1) {
+                style = { left: `${Math.round(ts / 2 + sideDx)}px`, top: '50%', transform: right };
+            } else if (relPos === 2) {
+                style = { left: '50%', top: `${Math.round(ts / 2 + topDy)}px`, transform: top };
             } else {
-                if (relPos === 0) {
-                    Object.assign(el.style, {
-                        left: '50%',
-                        top: `${nearEdge - s15 - offset - s10}px`,
-                        transform: `translateX(-50%) translateY(${heightComp}%) scale(${k})`,
-                    });
-                } else if (relPos === 1) {
-                    Object.assign(el.style, {
-                        left: `${nearEdge - offset + s15}px`,
-                        top: '50%',
-                        transform: `translate(-50%, -50%) rotate(-90deg) scale(${k})`,
-                    });
-                } else if (relPos === 2) {
-                    Object.assign(el.style, {
-                        left: '50%',
-                        top: `${farEdge + offset - s10}px`,
-                        transform: `translateX(-50%) rotate(180deg) translateY(${heightComp}%) scale(${k})`,
-                    });
-                } else if (relPos === 3) {
-                    Object.assign(el.style, {
-                        left: `${farEdge + offset - s15}px`,
-                        top: '50%',
-                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
-                    });
-                }
+                style = { left: `${Math.round(ts / 2 - sideDx)}px`, top: '50%', transform: left };
             }
+            Object.assign(el.style, style);
 
             // Click to change viewpoint
             el.onclick = (e) => {
