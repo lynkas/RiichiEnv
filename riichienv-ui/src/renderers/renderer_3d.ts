@@ -619,7 +619,15 @@ export class Renderer3D implements IRenderer {
         const halfH = 14.4;
         const bottomDy = (125 - 5 - 15 - 30 - 10 + halfH) * k; // +79.4 at k=1
         const topDy = -(125 - 5 - 30 + 10 - halfH) * k; // -85.6 at k=1
-        const sideDx = (125 - 5 - 30 + 15) * k; // 105 at k=1
+        // Side scores: the uniform-margin target (mean of top/bottom ≈ 42.5 at
+        // k=1, i.e. sideDx 82.5k) would overlap the side riichi stick. A
+        // side score rotated 90deg extends half its text width (worst case
+        // 6 chars x 14.4px = 86.4px, half 43.2k) along the edge direction,
+        // and the side stick (80x6 rotated 90deg, centered at 120k from the
+        // panel center) occupies [117k, 123k]. Non-overlap requires
+        // sideDx <= 117 - 43.2 = 73.8; 72k leaves ~1.8px clearance at k=1
+        // (edge margin 53k, the closest feasible value to 42.5k).
+        const sideDx = 72 * k; // 72 at k=1
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
