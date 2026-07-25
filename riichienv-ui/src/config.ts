@@ -126,6 +126,8 @@ export interface LayoutConfig3D {
     handLayerHeight: number;
     /** Center info panel size in px (square, default 250). */
     centerInfoSize: number;
+    /** Extra radial offset (px) pushing rivers away from the table center. */
+    riverOutset?: number;
     /** Tile dimensions [width, height] per rendering context. */
     tileSizes: {
         riverTile: [number, number];
@@ -171,7 +173,10 @@ export function createLayout3DConfig3P(): LayoutConfig3D {
             perspective: 1500,
             tiltAngle: 35,
             handLayerHeight: 0,
-            centerInfoSize: 150,
+            centerInfoSize: 225,
+            // Panel half grew 75 -> 112.5 (+37.5); push rivers out by the
+            // same amount so the panel-edge-to-river gap is unchanged.
+            riverOutset: 37.5,
             tileSizes: {
                 riverTile: [26, 36],
                 opponentTile: [30, 42],

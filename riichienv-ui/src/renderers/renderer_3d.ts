@@ -662,25 +662,27 @@ export class Renderer3D implements IRenderer {
         const ts = this.layout.tableSize;
         // All rivers scaled up for better visibility
         const riverScale = 1.35;
+        // Extra radial offset (portrait 3P: follows the enlarged center panel)
+        const outset = this.layout.riverOutset || 0;
         // Left/right rivers shifted toward center by one tile height
         const positions4P: { [key: number]: { left: string; top: string; transform: string } } = {
             0: {
                 left: '50%',
-                top: `${Math.round(ts * 0.7)}px`,
+                top: `${Math.round(ts * 0.7 + outset)}px`,
                 transform: `translate(-50%, -50%) scale(${riverScale})`,
             },
             1: {
-                left: `${Math.round(ts * 0.73 - th)}px`,
+                left: `${Math.round(ts * 0.73 - th + outset)}px`,
                 top: '50%',
                 transform: `translate(-50%, -50%) rotate(-90deg) scale(${riverScale})`,
             },
             2: {
                 left: '50%',
-                top: `${Math.round(ts * 0.3)}px`,
+                top: `${Math.round(ts * 0.3 - outset)}px`,
                 transform: `translate(-50%, -50%) rotate(180deg) scale(${riverScale})`,
             },
             3: {
-                left: `${Math.round(ts * 0.27 + th)}px`,
+                left: `${Math.round(ts * 0.27 + th - outset)}px`,
                 top: '50%',
                 transform: `translate(-50%, -50%) rotate(90deg) scale(${riverScale})`,
             },
@@ -688,17 +690,17 @@ export class Renderer3D implements IRenderer {
         const positions3P: { [key: number]: { left: string; top: string; transform: string } } = {
             0: {
                 left: '50%',
-                top: `${Math.round(ts * 0.7)}px`,
+                top: `${Math.round(ts * 0.7 + outset)}px`,
                 transform: `translate(-50%, -50%) scale(${riverScale})`,
             },
             1: {
-                left: `${Math.round(ts * 0.73 - th)}px`,
+                left: `${Math.round(ts * 0.73 - th + outset)}px`,
                 top: '50%',
                 transform: `translate(-50%, -50%) rotate(-90deg) scale(${riverScale})`,
             },
             2: {
                 left: '50%',
-                top: `${Math.round(ts * 0.3)}px`,
+                top: `${Math.round(ts * 0.3 - outset)}px`,
                 transform: `translate(-50%, -50%) rotate(180deg) scale(${riverScale})`,
             },
         };
