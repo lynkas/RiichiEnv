@@ -534,6 +534,23 @@ export class Renderer3D implements IRenderer {
     // =========================================================================
     private renderRiichiSticks(table: HTMLElement, state: BoardState, pc: number): void {
         const ts = this.layout.tableSize;
+        // Four-way symmetric placement: every stick sits just OUTSIDE the
+        // center panel edge, at the same radial distance in all directions.
+        // Center-anchored (translate(-50%,-50%) before rotate/scale) so the
+        // visual center is exactly stickDist from the panel center and scale(k)
+        // pivots on that point with zero drift. Stick = 80x6, so half-thickness
+        // is 3k after scaling.
+        const centerHalf = (this.layout.centerInfoSize || 250) / 2;
+        const k = (centerHalf * 2) / 250;
+        const stickGap = 3 * k; // gap between panel edge and stick inner edge
+        const stickDist = centerHalf + stickGap + 3 * k; // 131 at k=1
+        // relPos: 0=bottom, 1=right, 2=top, 3=left (3P has no left)
+        const dirs = [
+            { dx: 0, dy: 1, rot: '' },
+            { dx: 1, dy: 0, rot: 'rotate(90deg) ' },
+            { dx: 0, dy: -1, rot: '' },
+            { dx: -1, dy: 0, rot: 'rotate(90deg) ' },
+        ];
         state.players.forEach((p, i) => {
             if (!p.riichi) return;
             const relPos = (i - this.viewpoint + pc) % pc;
@@ -544,61 +561,12 @@ export class Renderer3D implements IRenderer {
             dot.className = 'dot';
             stick.appendChild(dot);
 
-            // Position just inside the edges of the center info panel
-            const centerHalf = (this.layout.centerInfoSize || 250) / 2;
-            const k = (centerHalf * 2) / 250;
-            const inset = 5 * k;
-            const stickGap = 15 * k;
-            const nearEdge = Math.round(ts / 2 + centerHalf - inset);
-            const farEdge = Math.round(ts / 2 - centerHalf + inset);
-            if (pc === 3) {
-                // 3P: 0=bottom, 1=right, 2=opposite (top)
-                if (relPos === 0) {
-                    Object.assign(stick.style, {
-                        left: '50%',
-                        top: `${nearEdge - stickGap}px`,
-                        transform: `translateX(-50%) scale(${k})`,
-                    });
-                } else if (relPos === 1) {
-                    Object.assign(stick.style, {
-                        left: `${nearEdge}px`,
-                        top: '50%',
-                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
-                    });
-                } else if (relPos === 2) {
-                    Object.assign(stick.style, {
-                        left: '50%',
-                        top: `${farEdge}px`,
-                        transform: `translateX(-50%) scale(${k})`,
-                    });
-                }
-            } else {
-                if (relPos === 0) {
-                    Object.assign(stick.style, {
-                        left: '50%',
-                        top: `${nearEdge - stickGap}px`,
-                        transform: `translateX(-50%) scale(${k})`,
-                    });
-                } else if (relPos === 1) {
-                    Object.assign(stick.style, {
-                        left: `${nearEdge}px`,
-                        top: '50%',
-                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
-                    });
-                } else if (relPos === 2) {
-                    Object.assign(stick.style, {
-                        left: '50%',
-                        top: `${farEdge}px`,
-                        transform: `translateX(-50%) scale(${k})`,
-                    });
-                } else if (relPos === 3) {
-                    Object.assign(stick.style, {
-                        left: `${farEdge}px`,
-                        top: '50%',
-                        transform: `translate(-50%, -50%) rotate(90deg) scale(${k})`,
-                    });
-                }
-            }
+            const d = dirs[relPos];
+            Object.assign(stick.style, {
+                left: `${Math.round(ts / 2 + stickDist * d.dx)}px`,
+                top: `${Math.round(ts / 2 + stickDist * d.dy)}px`,
+                transform: `translate(-50%, -50%) ${d.rot}scale(${k})`,
+            });
             table.appendChild(stick);
         });
     }
@@ -610,24 +578,17 @@ export class Renderer3D implements IRenderer {
         const ts = this.layout.tableSize;
         const centerHalf = (this.layout.centerInfoSize || 250) / 2;
         const k = (centerHalf * 2) / 250;
-        // Center-anchored positioning: left/top mark the score's center point and
-        // translate(-50%,-50%) is applied first so rotate/scale(k) pivot on that
-        // same point (zero drift at any k). Offsets below are the k=1 (250px panel)
-        // center distances from the panel center, derived from the original
-        // edge-anchored formulas (panel half 125, inset 5, offset 30, margins
-        // 15/10/15) plus the element half-height 14.4 (24px font x ~1.2 line-height).
-        const halfH = 14.4;
-        const bottomDy = (125 - 5 - 15 - 30 - 10 + halfH) * k; // +79.4 at k=1
-        const topDy = -(125 - 5 - 30 + 10 - halfH) * k; // -85.6 at k=1
-        // Side scores: the uniform-margin target (mean of top/bottom ≈ 42.5 at
-        // k=1, i.e. sideDx 82.5k) would overlap the side riichi stick. A
-        // side score rotated 90deg extends half its text width (worst case
-        // 6 chars x 14.4px = 86.4px, half 43.2k) along the edge direction,
-        // and the side stick (80x6 rotated 90deg, centered at 120k from the
-        // panel center) occupies [117k, 123k]. Non-overlap requires
-        // sideDx <= 117 - 43.2 = 73.8; 72k leaves ~1.8px clearance at k=1
-        // (edge margin 53k, the closest feasible value to 42.5k).
-        const sideDx = 72 * k; // 72 at k=1
+        // Four-way symmetric: every score's center sits scoreMargin inside the
+        // corresponding panel edge, center-anchored so rotate/scale(k) pivot on
+        // that point (zero drift at any k). Worst case text is 6 monospace
+        // chars (24px font, 0.6em advance => 14.4px/char, half-width 43.2k)
+        // for the 90deg-rotated side scores: the outer text edge reaches
+        // (80 + 43.2)k = 123.2k, staying 1.8k inside the panel edge (125k) and
+        // 4.8k clear of the riichi stick (inner edge 128k). Top/bottom scores
+        // only extend half their height (14.4k) radially, so they clear both
+        // with wide margin.
+        const scoreMargin = 45 * k;
+        const scoreDist = centerHalf - scoreMargin; // 80 at k=1
 
         state.players.forEach((p, i) => {
             const relPos = (i - this.viewpoint + pc) % pc;
@@ -636,24 +597,25 @@ export class Renderer3D implements IRenderer {
             el.className = 'floating-score-3d';
             el.textContent = p.score.toString();
 
-            // Position above riichi stick, rotated to face the player
-            // "above" = closer to center from the riichi stick position
+            // Rotated to face the player
             const bottom = `translate(-50%, -50%) scale(${k})`;
             const right = `translate(-50%, -50%) rotate(-90deg) scale(${k})`;
             const top = `translate(-50%, -50%) rotate(180deg) scale(${k})`;
             const left = `translate(-50%, -50%) rotate(90deg) scale(${k})`;
 
-            let style: { left: string; top: string; transform: string };
-            if (relPos === 0) {
-                style = { left: '50%', top: `${Math.round(ts / 2 + bottomDy)}px`, transform: bottom };
-            } else if (relPos === 1) {
-                style = { left: `${Math.round(ts / 2 + sideDx)}px`, top: '50%', transform: right };
-            } else if (relPos === 2) {
-                style = { left: '50%', top: `${Math.round(ts / 2 + topDy)}px`, transform: top };
-            } else {
-                style = { left: `${Math.round(ts / 2 - sideDx)}px`, top: '50%', transform: left };
-            }
-            Object.assign(el.style, style);
+            // relPos: 0=bottom, 1=right, 2=top, 3=left (3P has no left)
+            const dirs = [
+                { dx: 0, dy: 1, transform: bottom },
+                { dx: 1, dy: 0, transform: right },
+                { dx: 0, dy: -1, transform: top },
+                { dx: -1, dy: 0, transform: left },
+            ];
+            const d = dirs[relPos];
+            Object.assign(el.style, {
+                left: `${Math.round(ts / 2 + scoreDist * d.dx)}px`,
+                top: `${Math.round(ts / 2 + scoreDist * d.dy)}px`,
+                transform: d.transform,
+            });
 
             // Click to change viewpoint
             el.onclick = (e) => {
