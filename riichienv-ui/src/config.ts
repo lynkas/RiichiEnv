@@ -161,8 +161,18 @@ export function createLayout3DConfig4P(): LayoutConfig3D {
     };
 }
 
+/**
+ * Single source of truth for the two-mode layout decision. The project has
+ * exactly two modes: portrait (viewport taller than wide -> pure top-down
+ * table) and landscape (tilted perspective). No intermediate states.
+ * Equivalent to CSS `matchMedia('(orientation: portrait)')`.
+ */
+export function isPortraitViewport(): boolean {
+    return typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+}
+
 export function createLayout3DConfig3P(): LayoutConfig3D {
-    const portrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+    const portrait = isPortraitViewport();
     if (portrait) {
         return {
             viewAreaWidth: 720,
