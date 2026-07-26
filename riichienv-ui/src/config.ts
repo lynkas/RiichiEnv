@@ -128,6 +128,13 @@ export interface LayoutConfig3D {
     centerInfoSize: number;
     /** Extra radial offset (px) pushing rivers away from the table center. */
     riverOutset?: number;
+    /**
+     * 3P portrait only: radial offset (px) for the side (relIndex=1) river,
+     * replacing the legacy `-th` alignment term. Larger than riverOutset
+     * because the side river's first row must clear both the bottom and the
+     * top river's first row at the two right-side corners.
+     */
+    riverOutsetSide?: number;
     /** Tile dimensions [width, height] per rendering context. */
     tileSizes: {
         riverTile: [number, number];
@@ -187,11 +194,17 @@ export function createLayout3DConfig3P(): LayoutConfig3D {
             tiltAngle: 0,
             handLayerHeight: 0,
             centerInfoSize: 225,
-            // Panel half grew 75 -> 112.5 (+37.5); push rivers out by the
-            // same amount so the panel-edge-to-river gap is unchanged.
-            riverOutset: 37.5,
+            // Panel half grew 75 -> 112.5; riverOutset keeps the panel-edge-to-
+            // river gap constant (37.5 base + 12.5 for the taller river tiles).
+            riverOutset: 50,
+            // Side river needs a larger radial push so its first row clears
+            // both neighbors' first rows (incl. rotated riichi tiles) at the
+            // right-side corners with a visible gap.
+            riverOutsetSide: 44,
             tileSizes: {
-                riverTile: [26, 36],
+                // Portrait river tiles are ~11% larger than landscape for
+                // readability on narrow screens.
+                riverTile: [29, 40],
                 opponentTile: [30, 42],
                 ownTile: [60, 84],
                 doraTile: [28, 39],

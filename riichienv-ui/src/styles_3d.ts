@@ -92,15 +92,15 @@ export const VIEWER_3D_CSS = `
         align-items: flex-end;
     }
     .table-tile {
-        width: 26px;
-        height: 36px;
+        width: var(--rtw, 26px);
+        height: var(--rth, 36px);
         flex-shrink: 0;
         position: relative;
         transform-style: preserve-3d;
     }
     .table-tile-rotated {
-        width: 36px;
-        height: 26px;
+        width: var(--rth, 36px);
+        height: var(--rtw, 26px);
         flex-shrink: 0;
         position: relative;
         transform-style: preserve-3d;
@@ -110,8 +110,8 @@ export const VIEWER_3D_CSS = `
     }
     .table-tile-rotated .tile-layer {
         position: absolute;
-        width: 26px;
-        height: 36px;
+        width: var(--rtw, 26px);
+        height: var(--rth, 36px);
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%) rotate(90deg);

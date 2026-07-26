@@ -658,6 +658,9 @@ export class Renderer3D implements IRenderer {
             width: `${riverW}px`,
             height: `${riverH}px`,
         });
+        // Feed configured tile size into the CSS (falls back to 26x36).
+        wrapper.style.setProperty('--rtw', `${tw}px`);
+        wrapper.style.setProperty('--rth', `${th}px`);
 
         // Position on table (proportional to table size)
         const ts = this.layout.tableSize;
@@ -695,7 +698,13 @@ export class Renderer3D implements IRenderer {
                 transform: `translate(-50%, -50%) scale(${riverScale})`,
             },
             1: {
-                left: `${Math.round(ts * 0.73 - th + outset)}px`,
+                // Portrait (riverOutsetSide set): pure radial offset without
+                // the legacy -th alignment, pushing the side river far enough
+                // out that its first row clears both corner neighbors.
+                left:
+                    this.layout.riverOutsetSide !== undefined
+                        ? `${Math.round(ts * 0.73 + this.layout.riverOutsetSide)}px`
+                        : `${Math.round(ts * 0.73 - th + outset)}px`,
                 top: '50%',
                 transform: `translate(-50%, -50%) rotate(-90deg) scale(${riverScale})`,
             },
@@ -815,7 +824,12 @@ export class Renderer3D implements IRenderer {
         };
         const positions3P: { [key: number]: { left: string; top: string; transform: string } } = {
             1: {
-                left: `${Math.round((ts * 0.745 - rth + halfRiverExtent + ts) / 2)}px`,
+                // Portrait: sit just outside the side river's outer edge
+                // (river center + half river extent + half hand width + gap).
+                left:
+                    this.layout.riverOutsetSide !== undefined
+                        ? `${Math.round(ts * 0.73 + this.layout.riverOutsetSide + halfRiverExtent + this.layout.tileSizes.opponentTile[1] / 2 + 6)}px`
+                        : `${Math.round((ts * 0.745 - rth + halfRiverExtent + ts) / 2)}px`,
                 top: '50%',
                 transform: 'translate(-50%, -50%) rotate(-90deg)',
             },
