@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import type { TextureCache } from './textures';
+import type { TileTextureFactory } from './textures.js';
+import type { TileSet } from './tileset.js';
 
 /**
  * A single mahjong tile built from one RoundedBoxGeometry.
@@ -15,46 +16,77 @@ import type { TextureCache } from './textures';
  * around (no mating seam between two stacked boxes). The four side faces
  * (±X, ±Z) share a single material whose `map` is a vertical gradient
  * texture: cream above, gold for the bottom 3 mm. Because the gold band
- * (3/16.5 ≈ 18.2% of V) is wider than the rounded bevel region
- * (arcUvRatio ≈ 10% for radius=2), the entire bottom bevel renders gold —
- * the bevel never samples the cream half of the gradient.
+ * (3/height) is wider than the rounded bevel region (arcUvRatio ≈ 10%), the
+ * entire bottom bevel renders gold — the bevel never samples the cream half
+ * of the gradient.
  *
  * BoxGeometry/RoundedBoxGeometry material group order is
  * [+X, -X, +Y, -Y, +Z, -Z]. +Y is the glyph face; -Y is the back-design
  * face; the four remaining groups are the sides and share one material.
  *
- * The mesh origin is at the geometric centre, so setPosition(x, height/2, z)
- * rests the tile on the table (y=0).
+ * The top (+Y) face is a ShaderMaterial that composites the glyph PNG
+ * (transparent background, RGB = stroke colour, alpha = shape mask) over a
+ * cream base colour uniform: `mix(bgColor, tex.rgb, tex.a)`. Because the
+ * base colour comes from a uniform rather than the texture, mipmapping of
+ * the alpha channel only softens edges — it never bleaches the strokes.
+ * The material ignores scene lighting, so the face reads at a constant
+ * brightness.
+ *
+ * All dimensions, colours and shader parameters come from the {@link TileSet}
+ * passed to the constructor — nothing is hardcoded here. The mesh origin is
+ * at the geometric centre, so setPosition(x, height/2, z) rests the tile on
+ * the table (y=0).
  */
 export class Tile3D {
     mesh: THREE.Mesh;
-    /** All six slot materials (side material appears four times). Debug UIs
-     * iterate this for roughness/metalness — duplicates are idempotent. */
-    materials: THREE.MeshStandardMaterial[];
+    materials: THREE.Material[];
+    tileSet: TileSet;
 
-    // Real mahjong tile physics: 21mm wide (X) × 16.5mm thick (Y, stacking
-    // axis) × 28mm long (Z). 1 unit = 1mm.
-    constructor(width = 21, height = 16.5, depth = 28, segments = 6, radius = 2) {
-        const geo = new RoundedBoxGeometry(width, height, depth, segments, radius);
+    constructor(tileSet: TileSet) {
+        this.tileSet = tileSet;
+        const c = tileSet.config;
+
+        const geo = new RoundedBoxGeometry(c.width, c.height, c.depth, tileSet.segments, c.radius);
 
         // Side material: cream base, replaced by a cream→gold gradient `map`
         // (set via setSideTexture). White colour so the map renders
         // unmultiplied.
         const sideMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0 });
-        // Top (+Y) face material: glyph texture set via setTopTexture.
-        // emissive + emissiveMap (= map) keep the glyph face bright so the
-        // cream/glyph colour survives directional lighting + ACESFilmic tone
-        // mapping instead of washing out to grey.
-        const topMat = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            roughness: 0.7,
-            metalness: 0,
-            emissive: 0xffffff,
-            emissiveIntensity: 1.0,
+        // Top (+Y) face material: cream lacquer + SVG glyph. The glyph PNG is
+        // transparent (alpha = shape mask, RGB = stroke colour); the shader
+        // composites it over a cream base colour uniform so mipmapping never
+        // washes out the strokes.
+        const topMat = new THREE.ShaderMaterial({
+            uniforms: {
+                texMap: { value: null },
+                bgColor: { value: new THREE.Color(c.bgColor) },
+                colorBoost: { value: c.colorBoost },
+                glowIntensity: { value: c.glowIntensity },
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D texMap;
+                uniform vec3 bgColor;
+                uniform float colorBoost;
+                uniform float glowIntensity;
+                varying vec2 vUv;
+                void main() {
+                    vec4 tex = texture2D(texMap, vUv);
+                    vec3 base = mix(bgColor, tex.rgb * colorBoost, tex.a);
+                    vec3 glow = tex.rgb * tex.a * glowIntensity;
+                    gl_FragColor = vec4(base + glow, 1.0);
+                }
+            `,
         });
         // Bottom (-Y) face material: back-design texture set via
-        // setBottomTexture.
-        const bottomMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0 });
+        // setBottomTexture. Coloured from the tileset's back colour.
+        const bottomMat = new THREE.MeshStandardMaterial({ color: c.backColor, roughness: 0.7, metalness: 0 });
 
         // [+X, -X, +Y, -Y, +Z, -Z]
         this.materials = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
@@ -64,53 +96,67 @@ export class Tile3D {
     }
 
     /**
-     * Apply the shared side gradient (cream top, gold bottom 3 mm) to all
-     * four side faces. Cached by TextureCache so all tiles share one canvas
-     * texture.
+     * Apply the shared side gradient (cream top, gold bottom band) to all
+     * four side faces. Cached by TileTextureFactory so all tiles share one
+     * canvas texture.
      */
     setSideTexture(tex: THREE.Texture): void {
-        const sideMat = this.materials[0];
+        const sideMat = this.materials[0] as THREE.MeshStandardMaterial;
         sideMat.map = tex;
         sideMat.color.setHex(0xffffff);
         sideMat.needsUpdate = true;
     }
 
-    /** Paint the +Y face with the resolved glyph texture. */
-    setTopTexture(tex: THREE.Texture): void {
-        this.materials[2].map = tex;
-        this.materials[2].emissiveMap = tex;
-        this.materials[2].needsUpdate = true;
-    }
-
     /** Paint the -Y face with the resolved back-design texture. */
     setBottomTexture(tex: THREE.Texture): void {
-        this.materials[3].map = tex;
-        this.materials[3].needsUpdate = true;
+        const mat = this.materials[3] as THREE.MeshStandardMaterial;
+        mat.map = tex;
+        mat.needsUpdate = true;
     }
 
     /**
      * Tint the -Y (back) face material colour. Note: when a back-design
      * texture is bound via setBottomTexture, this colour multiplies the
      * texture (white = neutral). To change the back's gold frame instead,
-     * regenerate the back texture (TextureCache.getBack) and call
-     * setBottomTexture. The companion side-band colour is handled by the
-     * caller via TextureCache.getSide(color) + setSideTexture.
+     * regenerate the back texture (TileTextureFactory.getBackTexture) and
+     * call setBottomTexture. The companion side-band colour is handled by the
+     * caller via TileTextureFactory.getSideTexture(color) + setSideTexture.
      */
     setBackColor(hexColor: number): void {
-        this.materials[3].color.setHex(hexColor);
-        this.materials[3].needsUpdate = true;
+        const mat = this.materials[3] as THREE.MeshStandardMaterial;
+        mat.color.setHex(hexColor);
+        mat.needsUpdate = true;
     }
 
-    /** Resolve `code` through `cache` (async SVG→canvas) and paint the +Y face. */
-    async setTileCode(code: string, cache: TextureCache): Promise<void> {
-        const tex = await cache.get(code);
-        this.setTopTexture(tex);
+    /**
+     * Resolve `code` to its face texture (SVG → Canvas → CanvasTexture via
+     * `factory.getFaceTexture`) and bind it to the +Y ShaderMaterial's
+     * `texMap` uniform. The shader composites the transparent glyph PNG over
+     * the cream base colour. Blank codes (per the tileset, e.g. 白板 P / 5z)
+     * render no glyph — texMap is left null so the shader samples full
+     * transparency and shows the pure cream bgColor.
+     */
+    async setCode(code: string, factory: TileTextureFactory): Promise<void> {
+        if (this.tileSet.config.blankCodes.includes(code)) {
+            const topMat = this.materials[2];
+            if (topMat instanceof THREE.ShaderMaterial) {
+                topMat.uniforms.texMap.value = null;
+            }
+            this.mesh.userData.tileCode = code;
+            return;
+        }
+
+        const tex = await factory.getFaceTexture(code);
+        const topMat = this.materials[2];
+        if (topMat instanceof THREE.ShaderMaterial) {
+            topMat.uniforms.texMap.value = tex;
+        }
         this.mesh.userData.tileCode = code;
     }
 
-    /** Resolve the back design through `cache` and paint the -Y face. */
-    async setBack(cache: TextureCache): Promise<void> {
-        const tex = await cache.getBack();
+    /** Resolve the back design through `factory` and paint the -Y face. */
+    async setBack(factory: TileTextureFactory): Promise<void> {
+        const tex = await factory.getBackTexture();
         this.setBottomTexture(tex);
     }
 
