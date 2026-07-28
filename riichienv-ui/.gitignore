@@ -1,4 +1,5 @@
 dist/
+debug/
 src/tiles.ts
 src/wasm/pkg/
 node_modules/
