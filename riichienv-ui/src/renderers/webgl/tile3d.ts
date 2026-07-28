@@ -40,12 +40,21 @@ export class Tile3D {
         // Side material: cream base, replaced by a cream→gold gradient `map`
         // (set via setSideTexture). White colour so the map renders
         // unmultiplied.
-        const sideMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.75 });
+        const sideMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0 });
         // Top (+Y) face material: glyph texture set via setTopTexture.
-        const topMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.75 });
+        // emissive + emissiveMap (= map) keep the glyph face bright so the
+        // cream/glyph colour survives directional lighting + ACESFilmic tone
+        // mapping instead of washing out to grey.
+        const topMat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.7,
+            metalness: 0,
+            emissive: 0xffffff,
+            emissiveIntensity: 1.0,
+        });
         // Bottom (-Y) face material: back-design texture set via
         // setBottomTexture.
-        const bottomMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.75 });
+        const bottomMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0 });
 
         // [+X, -X, +Y, -Y, +Z, -Z]
         this.materials = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
@@ -69,6 +78,7 @@ export class Tile3D {
     /** Paint the +Y face with the resolved glyph texture. */
     setTopTexture(tex: THREE.Texture): void {
         this.materials[2].map = tex;
+        this.materials[2].emissiveMap = tex;
         this.materials[2].needsUpdate = true;
     }
 
