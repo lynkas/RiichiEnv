@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::action::{Action, ActionType, Phase};
@@ -24,7 +25,7 @@ use wall::WallState3P;
 
 const NP: usize = 3;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HoraSnapshot {
     pub hand: Vec<u8>,
     pub melds: Vec<Meld>,
@@ -42,7 +43,7 @@ pub struct HoraSnapshot {
     pub nukidora_count: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState3P {
     pub wall: WallState3P,
     pub players: [PlayerState3P; NP],

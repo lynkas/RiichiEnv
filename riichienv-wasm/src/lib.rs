@@ -600,6 +600,24 @@ pub fn sanma_new_game_with_wall(wall_json: &str, initial_oya: u8) -> Result<JsVa
         .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
 }
 
+#[wasm_bindgen]
+pub fn sanma_export_state() -> Result<String, JsValue> {
+    with_state_ref(|state| {
+        serde_json::to_string(state)
+            .map_err(|e| JsValue::from_str(&format!("State serialize error: {}", e)))
+    })?
+}
+
+#[wasm_bindgen]
+pub fn sanma_import_state(json: &str) -> Result<JsValue, JsValue> {
+    let state: GameState3P = serde_json::from_str(json)
+        .map_err(|e| JsValue::from_str(&format!("State deserialize error: {}", e)))?;
+    GAME_STATE.with(|cell| {
+        *cell.borrow_mut() = Some(state);
+    });
+    Ok(JsValue::UNDEFINED)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

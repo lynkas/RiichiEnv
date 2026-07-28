@@ -1,5 +1,6 @@
 use rand::prelude::*;
 use rand::rngs::StdRng;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::types::{TILES_4P, is_sanma_excluded_tile};
@@ -38,7 +39,7 @@ use crate::types::{TILES_4P, is_sanma_excluded_tile};
 ///
 /// `drawable_count` is initialized to `tiles.len() - 14` after dealing.
 /// Wall state for 3-player mahjong (108 tiles, sanma hardcoded).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WallState3P {
     pub tiles: Vec<u8>,
     pub dora_indicators: Vec<u8>,
