@@ -1,12 +1,22 @@
 import * as THREE from 'three';
 import { DicePair } from './dice.js';
 import { makeLedPanel, ledText, ledDot, ledFont, type LedPanel } from './led.js';
+import {
+    BOARD_DIST,
+    SEAT_ROTATIONS,
+    SEAT_WINDS,
+    TOWER_FF1,
+    TOWER_FF2,
+    TOWER_TIER1_H,
+    TOWER_TIER2_H,
+    TOWER_TOP,
+} from './layout.js';
 
 /**
- * Central console "black-diamond ring": a two-tier octagonal crystal
- * tower (340mm flat-to-flat) with glowing gold seams, a glass dome over
- * two dice, per-seat standing scoreboards (gold frame + LED face) and
- * per-seat LED info bars embedded in the upper tier's vertical faces.
+ * Central console: a two-tier octagonal crystal tower with glowing gold
+ * seams, a glass dome over two dice, per-seat standing scoreboards
+ * (gold frame + LED face) and per-seat LED info bars embedded in the
+ * upper tier's vertical faces. All proportions come from layout.ts.
  */
 
 export interface ConsoleState {
@@ -20,23 +30,6 @@ export interface ConsoleState {
     scores: number[];
     riichi: boolean[];
 }
-
-// Seat Y rotation convention: south=0, west=π/2, north=π, east=-π/2.
-// 3-player games use south / west / east.
-export const SEAT_ROTATIONS: Record<3 | 4, number[]> = {
-    4: [0, Math.PI / 2, Math.PI, -Math.PI / 2],
-    3: [0, Math.PI / 2, -Math.PI / 2],
-};
-
-const SEAT_WINDS: Record<3 | 4, string[]> = {
-    4: ['東', '南', '西', '北'],
-    3: ['東', '南', '西'],
-};
-
-const TIER1_H = 28;
-const TIER2_H = 17;
-const TOWER_TOP = TIER1_H + TIER2_H; // 45
-const BOARD_DIST = 255;
 
 interface SeatBoard {
     frameMat: THREE.MeshStandardMaterial;
@@ -72,27 +65,27 @@ export class ArenaConsole {
         const goldGlow = new THREE.MeshStandardMaterial({
             color: 0xd4af37,
             emissive: 0xd4af37,
-            emissiveIntensity: 0.6,
+            emissiveIntensity: 0.45,
             roughness: 0.3,
             metalness: 1,
         });
 
-        const r1 = 170 / Math.cos(Math.PI / 8); // flat-to-flat 340
-        const r2 = 145 / Math.cos(Math.PI / 8); // flat-to-flat 290
+        const r1 = TOWER_FF1 / 2 / Math.cos(Math.PI / 8); // flat-to-flat TOWER_FF1
+        const r2 = TOWER_FF2 / 2 / Math.cos(Math.PI / 8); // flat-to-flat TOWER_FF2
 
-        const tier1 = new THREE.Mesh(new THREE.CylinderGeometry(r1, r1, TIER1_H, 8), crystal);
+        const tier1 = new THREE.Mesh(new THREE.CylinderGeometry(r1, r1, TOWER_TIER1_H, 8), crystal);
         tier1.rotation.y = Math.PI / 8;
-        tier1.position.y = TIER1_H / 2;
+        tier1.position.y = TOWER_TIER1_H / 2;
         tier1.castShadow = true;
         tier1.receiveShadow = true;
 
         const seam1 = new THREE.Mesh(new THREE.TorusGeometry(r1 - 4, 1.3, 4, 8), goldGlow);
         seam1.rotation.set(Math.PI / 2, 0, Math.PI / 8); // spin in-plane first, then lay flat
-        seam1.position.y = TIER1_H;
+        seam1.position.y = TOWER_TIER1_H;
 
-        const tier2 = new THREE.Mesh(new THREE.CylinderGeometry(r2, r2, TIER2_H, 8), crystal);
+        const tier2 = new THREE.Mesh(new THREE.CylinderGeometry(r2, r2, TOWER_TIER2_H, 8), crystal);
         tier2.rotation.y = Math.PI / 8;
-        tier2.position.y = TIER1_H + TIER2_H / 2;
+        tier2.position.y = TOWER_TIER1_H + TOWER_TIER2_H / 2;
         tier2.castShadow = true;
 
         const seam2 = new THREE.Mesh(new THREE.TorusGeometry(r2 - 4, 1.3, 4, 8), goldGlow);
@@ -158,7 +151,7 @@ export class ArenaConsole {
     private buildSeatBoard(sg: THREE.Group): SeatBoard {
         const objects: THREE.Object3D[] = [];
 
-        // Standing scoreboard, tilted back ~10°, facing the seat.
+        // Standing scoreboard, tilted back ~10 deg, facing the seat.
         const frameMat = new THREE.MeshStandardMaterial({
             color: 0xd4af37,
             emissive: 0xd4af37,
@@ -190,9 +183,9 @@ export class ArenaConsole {
         sg.add(stand);
         objects.push(frame, glass);
 
-        // Info bar embedded in the upper tier's vertical face (face width ~121mm).
+        // Info bar embedded in the upper tier's vertical face.
         const bar = makeLedPanel(118, 24, 4);
-        bar.mesh.position.set(0, TIER1_H + TIER2_H / 2, 145 + 0.8);
+        bar.mesh.position.set(0, TOWER_TIER1_H + TOWER_TIER2_H / 2, TOWER_FF2 / 2 + 0.8);
         sg.add(bar.mesh);
 
         return { frameMat, panel, bar, objects };
@@ -229,7 +222,7 @@ export class ArenaConsole {
         for (let i = 0; i < this.boards.length; i++) {
             const mat = this.boards[i].frameMat;
             if (i === this.state.dealer) {
-                mat.emissiveIntensity = 0.45 + 0.4 * (0.5 + 0.5 * Math.sin(this.pulseT * 2.6));
+                mat.emissiveIntensity = 0.4 + 0.35 * (0.5 + 0.5 * Math.sin(this.pulseT * 2.6));
             } else {
                 mat.emissiveIntensity = 0.12;
             }

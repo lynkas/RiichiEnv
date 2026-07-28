@@ -1,20 +1,15 @@
 import * as THREE from 'three';
-import { STAGE_TOP_Y } from './arena.js';
+import { RIM_BOTTOM, RIM_OVERHANG, RIM_TOP, STAGE_TOP_Y, SURF_CUT, SURF_HALF } from './layout.js';
 
 /**
- * Octagonal obsidian altar: black felt playing surface with gold inlay
- * lines, a metal octagonal rim with a glowing gold trim strip, and a
- * tapered 8-sided pedestal dropping to the stage with a gold base ring.
+ * Octagonal mahjong table: green felt playing surface with subtle gold
+ * inlay lines, a metal octagonal rim with a thin gold trim, and a
+ * tapered 8-sided pedestal dropping to the stage. Surface top is y=0.
  *
- * The octagon has 4 long sides (the seat sides, facing ±X/±Z) and 4
- * short diagonal sides. Surface top is y=0.
+ * All proportions come from layout.ts (SURF_HALF / SURF_CUT); the
+ * pedestal radii scale with the surface so the whole body tracks
+ * TABLE_SIZE automatically.
  */
-
-const SURF_HALF = 500; // playing surface flat-to-flat = 1000mm
-const SURF_CUT = 180;  // corner cut along each edge → long side 640, diagonal ~255
-const RIM_OVERHANG = 55;
-const RIM_TOP = 22;
-const RIM_BOTTOM = -20;
 
 /** Octagon vertices in shape space (x, y), starting at the +y long side. */
 function octagonPoints(half: number, cut: number): [number, number][] {
@@ -55,7 +50,7 @@ function offsetOctagon(half: number, cut: number, d: number): { half: number; cu
     return { half: h2, cut: c2 };
 }
 
-/** Black felt: dark base + fine noise + radial vignette + gold inlays. */
+/** Green felt: dark green base + fine noise + mild vignette + dim gold inlays. */
 function makeFeltTexture(): THREE.CanvasTexture {
     const S = 512;
     const canvas = document.createElement('canvas');
@@ -64,43 +59,44 @@ function makeFeltTexture(): THREE.CanvasTexture {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('table_body: 2d context unavailable');
 
-    ctx.fillStyle = '#0c0c0e';
+    ctx.fillStyle = '#0d2818';
     ctx.fillRect(0, 0, S, S);
 
-    // Fine noise, ±5% brightness.
+    // Fine noise, +/-4% brightness.
     const img = ctx.getImageData(0, 0, S, S);
     const data = img.data;
     for (let i = 0; i < data.length; i += 4) {
-        const n = (Math.random() - 0.5) * 0.1 * 255;
+        const n = (Math.random() - 0.5) * 0.08 * 255;
         data[i] = Math.max(0, Math.min(255, data[i] + n));
         data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + n));
         data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + n));
     }
     ctx.putImageData(img, 0, 0);
 
-    // Radial vignette: edges sink into darkness.
-    const vg = ctx.createRadialGradient(S / 2, S / 2, S * 0.18, S / 2, S / 2, S * 0.52);
+    // Mild radial vignette: edges slightly darker (kept subtle for UI clarity).
+    const vg = ctx.createRadialGradient(S / 2, S / 2, S * 0.2, S / 2, S / 2, S * 0.55);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.38)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.22)');
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, S, S);
 
-    const gold = '#c9a227';
+    // Dim gold inlays (low glow so they read as engraved lines, not neon).
+    const gold = '#9a7b22';
     ctx.strokeStyle = gold;
     ctx.shadowColor = gold;
 
-    // Central discard-area square: 340mm of 1000mm → 0.34 * S.
+    // Central discard-area square (scales with the surface via UV mapping).
     const sq = S * 0.34;
-    ctx.lineWidth = 3;
-    ctx.shadowBlur = 14;
+    ctx.lineWidth = 2.5;
+    ctx.shadowBlur = 5;
     ctx.strokeRect((S - sq) / 2, (S - sq) / 2, sq, sq);
 
-    // One short gold line inside each seat edge (~90mm in from the edge).
+    // One short line inside each seat edge.
     const len = S * 0.24;
     const inset = S * 0.09;
-    ctx.lineWidth = 2;
-    ctx.shadowBlur = 8;
-    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 1.5;
+    ctx.shadowBlur = 3;
+    ctx.globalAlpha = 0.7;
     for (const [x1, y1, x2, y2] of [
         [S / 2 - len / 2, inset, S / 2 + len / 2, inset],
         [S / 2 - len / 2, S - inset, S / 2 + len / 2, S - inset],
@@ -117,7 +113,7 @@ function makeFeltTexture(): THREE.CanvasTexture {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 8;
-    // ShapeGeometry UVs are raw shape coordinates (mm, ±SURF_HALF).
+    // ShapeGeometry UVs are raw shape coordinates (mm, +/- SURF_HALF).
     const span = SURF_HALF * 2;
     texture.repeat.set(1 / span, 1 / span);
     texture.offset.set(0.5, 0.5);
@@ -131,7 +127,7 @@ export function buildTableBody(parent: THREE.Object3D): THREE.Group {
     // --- Playing surface (felt) ----------------------------------------
     const felt = new THREE.Mesh(
         new THREE.ShapeGeometry(octagonShape(SURF_HALF, SURF_CUT)),
-        new THREE.MeshStandardMaterial({ map: makeFeltTexture(), roughness: 0.9, metalness: 0.02 }),
+        new THREE.MeshStandardMaterial({ map: makeFeltTexture(), roughness: 0.92, metalness: 0.02 }),
     );
     felt.rotation.x = -Math.PI / 2;
     felt.receiveShadow = true;
@@ -143,7 +139,7 @@ export function buildTableBody(parent: THREE.Object3D): THREE.Group {
     rimShape.holes.push(octagonPath(SURF_HALF, SURF_CUT));
     const rim = new THREE.Mesh(
         new THREE.ExtrudeGeometry(rimShape, { depth: RIM_TOP - RIM_BOTTOM, bevelEnabled: false }),
-        new THREE.MeshStandardMaterial({ color: 0x0d0d0f, roughness: 0.42, metalness: 0.85 }),
+        new THREE.MeshStandardMaterial({ color: 0x121214, roughness: 0.5, metalness: 0.8 }),
     );
     rim.rotation.x = -Math.PI / 2;
     rim.position.y = RIM_BOTTOM;
@@ -151,7 +147,7 @@ export function buildTableBody(parent: THREE.Object3D): THREE.Group {
     rim.receiveShadow = true;
     group.add(rim);
 
-    // --- Glowing gold trim strip on the rim's top outer edge ------------
+    // --- Thin gold trim on the rim's top outer edge ---------------------
     const trimInner = offsetOctagon(rimOuter.half, rimOuter.cut, -7);
     const trimShape = octagonShape(rimOuter.half, rimOuter.cut);
     trimShape.holes.push(octagonPath(trimInner.half, trimInner.cut));
@@ -160,7 +156,7 @@ export function buildTableBody(parent: THREE.Object3D): THREE.Group {
         new THREE.MeshStandardMaterial({
             color: 0xd4af37,
             emissive: 0xd4af37,
-            emissiveIntensity: 0.35,
+            emissiveIntensity: 0.12,
             roughness: 0.3,
             metalness: 1,
         }),
@@ -170,8 +166,9 @@ export function buildTableBody(parent: THREE.Object3D): THREE.Group {
     group.add(trim);
 
     // --- Underside slab closing the table bottom -------------------------
+    const slabR = SURF_HALF / Math.cos(Math.PI / 8);
     const slab = new THREE.Mesh(
-        new THREE.CylinderGeometry(500 / Math.cos(Math.PI / 8), 500 / Math.cos(Math.PI / 8), 19.5, 8, 1),
+        new THREE.CylinderGeometry(slabR, slabR, 19.5, 8, 1),
         new THREE.MeshStandardMaterial({ color: 0x0b0b0d, roughness: 0.5, metalness: 0.7 }),
     );
     slab.rotation.y = Math.PI / 8;
@@ -179,11 +176,13 @@ export function buildTableBody(parent: THREE.Object3D): THREE.Group {
     slab.castShadow = true;
     group.add(slab);
 
-    // --- Tapered pedestal (8-sided frustum) ------------------------------
-    const pedestalH = RIM_BOTTOM - STAGE_TOP_Y; // 230
+    // --- Tapered pedestal (8-sided frustum), radii track SURF_HALF -------
+    const pedestalTop = SURF_HALF * 0.86;
+    const pedestalBottom = SURF_HALF * 0.62;
+    const pedestalH = RIM_BOTTOM - STAGE_TOP_Y;
     const pedestal = new THREE.Mesh(
-        new THREE.CylinderGeometry(430, 310, pedestalH, 8, 1),
-        new THREE.MeshStandardMaterial({ color: 0x0c0c0e, roughness: 0.55, metalness: 0.8 }),
+        new THREE.CylinderGeometry(pedestalTop, pedestalBottom, pedestalH, 8, 1),
+        new THREE.MeshStandardMaterial({ color: 0x101012, roughness: 0.6, metalness: 0.75 }),
     );
     pedestal.rotation.y = Math.PI / 8; // flats face the seat directions
     pedestal.position.y = STAGE_TOP_Y + pedestalH / 2;
@@ -193,11 +192,11 @@ export function buildTableBody(parent: THREE.Object3D): THREE.Group {
 
     // --- Gold base ring at the foot --------------------------------------
     const base = new THREE.Mesh(
-        new THREE.CylinderGeometry(335, 345, 12, 8, 1),
+        new THREE.CylinderGeometry(SURF_HALF * 0.67, SURF_HALF * 0.69, 12, 8, 1),
         new THREE.MeshStandardMaterial({
             color: 0xd4af37,
             emissive: 0xd4af37,
-            emissiveIntensity: 0.18,
+            emissiveIntensity: 0.1,
             roughness: 0.32,
             metalness: 1,
         }),

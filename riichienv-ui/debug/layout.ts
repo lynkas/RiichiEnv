@@ -1,37 +1,94 @@
 import * as THREE from 'three';
 import { Tile3D } from '../src/renderers/webgl/tile3d.js';
 import { TextureCache } from '../src/renderers/webgl/textures.js';
-import { SEAT_ROTATIONS } from './console.js';
 import type { DealResult } from './deck.js';
 
-/**
- * Table layout: per-seat wall (face-down double-layer stacks, with the
- * dead wall + dora indicator on seat 0), open standing hands on black
- * gold-edged racks, rivers with a riichi turn for the demo riichi seat,
- * and example melds (pon for everyone, ankan for the dealer).
- *
- * Everything is built in a seat-local frame (+Z toward the player) and
- * rotated by the seat's Y rotation.
- */
+// ============================================================
+// Centralised visual constants for the 3D mahjong table.
+//
+// Every debug module (arena / table_body / console / layout) reads
+// its dimensions, positions, camera and lighting from here so the
+// whole scene can be retuned from one place. Values target a clean
+// "CSS-3D UI" look: large readable tiles, steep top-down camera,
+// bright even lighting, no theatrical fog or volumetric shafts.
+// ============================================================
 
-const TILE_W = 21;
-const TILE_H = 16.5;
-const TILE_D = 28;
+// --- Tile geometry (x1.5 realistic mm, for UI readability) ---
+export const TILE_W = 32; // width  (real mahjong ~21mm)
+export const TILE_H = 24; // thickness (~16.5mm)
+export const TILE_D = 42; // length (~28mm)
 
-const WALL_Z = 360;
-const WALL_STEP = TILE_W + 0.6;
-const DEAD_GAP = WALL_STEP / 2;
+// --- Tile spacing (derived from tile dims) ---
+export const WALL_STEP = TILE_W + 0.6;
+export const DEAD_GAP = WALL_STEP / 2;
+export const HAND_STEP = TILE_W + 1.4;
+export const HAND_Y = TILE_D / 2;
+export const RIVER_STEP_X = TILE_W + 1.5;
+export const RIVER_STEP_Z = TILE_D + 2.5;
 
-const HAND_Z = 432;
-const HAND_STEP = TILE_W + 1.4;
-const HAND_Y = TILE_D / 2;
+// --- Table surface (octagon) ---
+export const TABLE_SIZE = 800; // flat-to-flat
+export const SURF_HALF = TABLE_SIZE / 2; // 400
+export const SURF_CUT = 144; // corner cut -> long seat side = 512mm
 
-const RIVER_Z0 = 178;
-const RIVER_STEP_X = TILE_W + 1.5;
-const RIVER_STEP_Z = TILE_D + 2.5;
+// --- Rim / pedestal ---
+export const RIM_OVERHANG = 50;
+export const RIM_TOP = 22;
+export const RIM_BOTTOM = -20;
 
-const MELD_Z = 430;
+// --- Seat-local layout positions (+Z toward the player) ---
+export const WALL_Z = 260;
+export const HAND_Z = 320;
+export const RIVER_Z0 = 120;
+export const MELD_Z = 300;
+export const MELD_X0 = 230; // first meld tile X (right of the hand)
 
+// --- Central console (tower + scoreboards) ---
+export const TOWER_TIER1_H = 28;
+export const TOWER_TIER2_H = 17;
+export const TOWER_TOP = TOWER_TIER1_H + TOWER_TIER2_H; // 45
+export const TOWER_FF1 = 272; // tier1 flat-to-flat (was 340)
+export const TOWER_FF2 = 232; // tier2 flat-to-flat (was 290)
+export const BOARD_DIST = 205; // scoreboard distance from centre
+
+// --- Stage (kept for the pedestal base; mostly off-screen) ---
+export const STAGE_TOP_Y = -250;
+export const STAGE_RADIUS = 1600;
+
+// --- Camera (matches CSS perspective ~1800px -> FOV 25, pitch ~48 deg) ---
+export const CAMERA_FOV = 25;
+export const CAMERA_POSITION: [number, number, number] = [360, 700, 480];
+export const CAMERA_TARGET: [number, number, number] = [0, 20, 0];
+export const CAMERA_NEAR = 1;
+export const CAMERA_FAR = 6000;
+
+// --- Lighting / atmosphere (clean UI, no theatrical effects) ---
+export const SCENE_BACKGROUND = 0x0b0b14;
+export const AMBIENT_INTENSITY = 0.1;
+export const SPOT_COLOR = 0xfff2dd;
+export const SPOT_INTENSITY = 1.2;
+export const RIM_LIGHT_INTENSITY = 0.18;
+export const FOG_COLOR = 0x0b0b14;
+export const FOG_DENSITY = 0; // 0 = invisible (object kept for GUI tuning)
+export const TONE_MAPPING_EXPOSURE = 1.0;
+export const ENVIRONMENT_INTENSITY = 0.3;
+
+// --- Seat rotations & winds (south=0, west=pi/2, north=pi, east=-pi/2).
+//     Moved here so console.ts can import layout constants without a cycle. ---
+export const SEAT_ROTATIONS: Record<3 | 4, number[]> = {
+    4: [0, Math.PI / 2, Math.PI, -Math.PI / 2],
+    3: [0, Math.PI / 2, -Math.PI / 2],
+};
+export const SEAT_WINDS: Record<3 | 4, string[]> = {
+    4: ['東', '南', '西', '北'],
+    3: ['東', '南', '西'],
+};
+
+// ============================================================
+// TableLayout — per-seat wall, open hands on racks, rivers, melds.
+// Built in a seat-local frame (+Z toward the player), rotated by the
+// seat's Y rotation.
+// ============================================================
 export class TableLayout {
     private group: THREE.Group | null = null;
     private readonly parent: THREE.Object3D;
@@ -158,7 +215,7 @@ export class TableLayout {
             new THREE.MeshStandardMaterial({
                 color: 0xd4af37,
                 emissive: 0xd4af37,
-                emissiveIntensity: 0.25,
+                emissiveIntensity: 0.15,
                 roughness: 0.3,
                 metalness: 1,
             }),
@@ -182,7 +239,7 @@ export class TableLayout {
             const x = (col - 2.5) * RIVER_STEP_X;
             const z = RIVER_Z0 + row * RIVER_STEP_Z;
             t.setPosition(x, TILE_H / 2, z);
-            // ±2° deterministic jitter.
+            // ±2 deg deterministic jitter.
             const pseudo = Math.sin(i * 12.9898 + seat * 78.233) * 43758.5453;
             const jitter = (pseudo - Math.floor(pseudo) - 0.5) * ((4 * Math.PI) / 180);
             t.mesh.rotation.y = jitter;
@@ -197,7 +254,7 @@ export class TableLayout {
         const gold = new THREE.MeshStandardMaterial({
             color: 0xd4af37,
             emissive: 0xd4af37,
-            emissiveIntensity: 0.3,
+            emissiveIntensity: 0.2,
             roughness: 0.3,
             metalness: 1,
         });
@@ -227,17 +284,16 @@ export class TableLayout {
         // Pon: 3 face-up, middle one sideways and nudged toward the player.
         pon.forEach((code, i) => {
             const t = this.makeTile(code, tasks);
-            t.setPosition(300 + i * (TILE_W + 1.5), TILE_H / 2, MELD_Z + (i === 1 ? 12 : 0));
+            t.setPosition(MELD_X0 + i * (TILE_W + 1.5), TILE_H / 2, MELD_Z + (i === 1 ? 12 : 0));
             if (i === 1) t.mesh.rotation.y = Math.PI / 2;
             sg.add(t.mesh);
         });
 
         // Dealer's concealed kan: ends face-down, middle two face-up.
-        // Placed centre-side of the pon so it stays clear of the cut corner.
         if (ankan) {
             ankan.forEach((code, i) => {
                 const t = this.makeTile(code, tasks);
-                t.setPosition(300 + i * (TILE_W + 1.5), TILE_H / 2, MELD_Z - 36);
+                t.setPosition(MELD_X0 + i * (TILE_W + 1.5), TILE_H / 2, MELD_Z - 36);
                 if (i === 0 || i === 3) t.flip();
                 sg.add(t.mesh);
             });

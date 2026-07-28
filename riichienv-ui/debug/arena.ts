@@ -2,11 +2,30 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { gsap } from 'gsap';
+import {
+    AMBIENT_INTENSITY,
+    CAMERA_FAR,
+    CAMERA_FOV,
+    CAMERA_NEAR,
+    CAMERA_POSITION,
+    CAMERA_TARGET,
+    ENVIRONMENT_INTENSITY,
+    FOG_COLOR,
+    FOG_DENSITY,
+    RIM_LIGHT_INTENSITY,
+    SCENE_BACKGROUND,
+    SPOT_COLOR,
+    SPOT_INTENSITY,
+    STAGE_RADIUS,
+    STAGE_TOP_Y,
+    TONE_MAPPING_EXPOSURE,
+} from './layout.js';
 
 /**
- * "Black-gold arena" stage: dark void, one warm key spotlight over the
- * table, low gold rim lights in the corners, glossy round stage with a
- * thin gold ring, and a faint additive light cone under the spotlight.
+ * Clean UI arena: dark backdrop, one soft key spotlight, bright ambient
+ * fill, dim gold corner accents. No volumetric shaft, no heavy fog —
+ * matches the flat CSS-3D renderer look. The stage disc is kept only as
+ * a base for the pedestal and sits mostly outside the closer camera.
  */
 
 export interface Arena {
@@ -15,53 +34,61 @@ export interface Arena {
     renderer: THREE.WebGLRenderer;
     controls: OrbitControls;
     spot: THREE.SpotLight;
+    ambient: THREE.AmbientLight;
     rimLights: THREE.PointLight[];
+    fog: THREE.FogExp2;
     onTick(cb: (dt: number, t: number) => void): void;
     flyTo(pos: [number, number, number], target: [number, number, number]): void;
 }
-
-export const STAGE_TOP_Y = -250;
 
 export function createArena(parent: HTMLElement): Arena {
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.9;
+    renderer.toneMappingExposure = TONE_MAPPING_EXPOSURE;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     parent.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050505);
-    scene.fog = new THREE.FogExp2(0x050505, 0.00032);
+    scene.background = new THREE.Color(SCENE_BACKGROUND);
+    // Fog object always present (density 0 = invisible) so the GUI can
+    // dial it up live without rebuilding the scene.
+    const fog = new THREE.FogExp2(FOG_COLOR, FOG_DENSITY);
+    scene.fog = fog;
 
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environmentIntensity = 0.22;
+    scene.environmentIntensity = ENVIRONMENT_INTENSITY;
     pmrem.dispose();
 
-    const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 8000);
-    camera.position.set(520, 620, 680);
+    const camera = new THREE.PerspectiveCamera(
+        CAMERA_FOV,
+        window.innerWidth / window.innerHeight,
+        CAMERA_NEAR,
+        CAMERA_FAR,
+    );
+    camera.position.set(...CAMERA_POSITION);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.maxPolarAngle = Math.PI / 2 - 0.06;
-    controls.minDistance = 300;
-    controls.maxDistance = 2500;
-    controls.target.set(0, 20, 0);
+    controls.maxPolarAngle = Math.PI / 2 - 0.04;
+    controls.minDistance = 200;
+    controls.maxDistance = 2000;
+    controls.target.set(...CAMERA_TARGET);
 
-    // --- Stage disc -----------------------------------------------------
+    // --- Stage disc (pedestal base, peripheral) -------------------------
     const stage = new THREE.Mesh(
-        new THREE.CylinderGeometry(1600, 1600, 40, 96),
+        new THREE.CylinderGeometry(STAGE_RADIUS, STAGE_RADIUS, 40, 96),
         new THREE.MeshPhysicalMaterial({
             color: 0x08080a,
-            roughness: 0.32,
+            roughness: 0.45,
             metalness: 0.15,
-            clearcoat: 1,
-            clearcoatRoughness: 0.22,
+            clearcoat: 0.6,
+            clearcoatRoughness: 0.4,
         }),
     );
     stage.position.y = STAGE_TOP_Y - 20;
@@ -69,11 +96,11 @@ export function createArena(parent: HTMLElement): Arena {
     scene.add(stage);
 
     const stageRing = new THREE.Mesh(
-        new THREE.TorusGeometry(1200, 2.5, 8, 160),
+        new THREE.TorusGeometry(STAGE_RADIUS * 0.75, 2.5, 8, 160),
         new THREE.MeshStandardMaterial({
             color: 0xd4af37,
             emissive: 0xd4af37,
-            emissiveIntensity: 0.45,
+            emissiveIntensity: 0.2,
             roughness: 0.3,
             metalness: 1,
         }),
@@ -82,17 +109,20 @@ export function createArena(parent: HTMLElement): Arena {
     stageRing.position.y = STAGE_TOP_Y + 1;
     scene.add(stageRing);
 
-    // --- Lights ---------------------------------------------------------
-    const spot = new THREE.SpotLight(0xfff2dd, 1.5, 0, 0.55, 0.45, 0);
+    // --- Lights (clean, even UI lighting) -------------------------------
+    const spot = new THREE.SpotLight(SPOT_COLOR, SPOT_INTENSITY, 0, 0.6, 0.5, 0);
     spot.position.set(0, 1200, 0);
     spot.target.position.set(0, 0, 0);
     spot.castShadow = true;
     spot.shadow.mapSize.set(2048, 2048);
-    spot.shadow.camera.near = 500;
-    spot.shadow.camera.far = 1800;
+    spot.shadow.camera.near = 200;
+    spot.shadow.camera.far = 2000;
     spot.shadow.bias = -0.0002;
     spot.shadow.normalBias = 1.5;
     scene.add(spot, spot.target);
+
+    const ambient = new THREE.AmbientLight(0xffffff, AMBIENT_INTENSITY);
+    scene.add(ambient);
 
     const rimLights: THREE.PointLight[] = [];
     const corners: [number, number, number][] = [
@@ -102,28 +132,13 @@ export function createArena(parent: HTMLElement): Arena {
         [-950, 80, -950],
     ];
     for (const [x, y, z] of corners) {
-        const p = new THREE.PointLight(0xd4af37, 0.55, 0, 0);
+        const p = new THREE.PointLight(0xd4af37, RIM_LIGHT_INTENSITY, 0, 0);
         p.position.set(x, y, z);
         scene.add(p);
         rimLights.push(p);
     }
-    scene.add(new THREE.AmbientLight(0xffffff, 0.035));
 
-    // Faint volumetric light shaft under the key light.
-    const shaft = new THREE.Mesh(
-        new THREE.ConeGeometry(720, 1150, 64, 1, true),
-        new THREE.MeshBasicMaterial({
-            color: 0xfff2dd,
-            transparent: true,
-            opacity: 0.03,
-            blending: THREE.AdditiveBlending,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-            fog: false,
-        }),
-    );
-    shaft.position.y = 625; // apex ~1200 (spot), base ~50 (just above felt)
-    scene.add(shaft);
+    // (The theatrical volumetric light shaft is intentionally removed.)
 
     // --- Loop / resize ----------------------------------------------------
     const tickCbs: ((dt: number, t: number) => void)[] = [];
@@ -147,7 +162,9 @@ export function createArena(parent: HTMLElement): Arena {
         renderer,
         controls,
         spot,
+        ambient,
         rimLights,
+        fog,
         onTick(cb) {
             tickCbs.push(cb);
         },
