@@ -1,9 +1,20 @@
 import { setupDebugScene } from './base.js';
 import { Tile3D } from '../src/renderers/webgl/tile3d.js';
-import { TextureCache } from '../src/renderers/webgl/textures.js';
+import { TileTextureFactory } from '../src/renderers/webgl/textures.js';
+import { TileSet } from '../src/renderers/webgl/tileset.js';
 
 const { scene, gui } = setupDebugScene(document.body);
-const cache = new TextureCache();
+
+// Compact debug tile — scaled down from the real 26×19×34 so the full 136-tile
+// grid fits on the 800mm table. Tile3D is a single RoundedBoxGeometry mesh;
+// its side material carries a cream→gold gradient map (gold band at the
+// bottom) and its -Y face carries the back design.
+const DEBUG_W = 15; // X width
+const DEBUG_H = 12; // Y thickness
+const DEBUG_D = 20; // Z length
+const tileSet = new TileSet({ width: DEBUG_W, height: DEBUG_H, depth: DEBUG_D, radius: 2 });
+const factory = new TileTextureFactory(tileSet);
+const HALF_H = DEBUG_H / 2;
 
 // --- Project tile encoding (mirrors sanma-shell web/core/tile-utils.js) ---
 // tile_34: 0-8 萬子(1m-9m), 9-17 筒子(1p-9p), 18-26 索子(1s-9s), 27-33 字牌
@@ -36,15 +47,6 @@ const ALL_GROUPS: { name: string; t34Start: number; count: number }[] = [
 
 const COPIES = 4; // four of each tile_34
 
-// Compact debug tile — scaled down from the real 21×16.5×28 so the full
-// 136-tile grid fits on the 800mm table. Tile3D is a single RoundedBoxGeometry
-// mesh; its side material carries a cream→gold gradient map (gold band at the
-// bottom) and its -Y face carries the back design.
-const DEBUG_W = 15; // X width
-const DEBUG_H = 12; // Y thickness
-const DEBUG_D = 20; // Z length
-const HALF_H = DEBUG_H / 2;
-
 // Layout within/between type-groups and between suit rows.
 const INTRA_GAP = 1; // gap between the 4 copies of one tile type
 const GROUP_W = COPIES * DEBUG_W + (COPIES - 1) * INTRA_GAP; // 63
@@ -68,8 +70,8 @@ async function buildAllTiles(): Promise<void> {
             const groupX = (g - (group.count - 1) / 2) * GROUP_STEP;
             for (let c = 0; c < COPIES; c++) {
                 const code = codeForCopy(t34, c);
-                const tile = new Tile3D(DEBUG_W, DEBUG_H, DEBUG_D);
-                await tile.setTileCode(code, cache);
+                const tile = new Tile3D(tileSet);
+                await tile.setCode(code, factory);
                 const x = groupX + (c - (COPIES - 1) / 2) * (DEBUG_W + INTRA_GAP);
                 tile.setPosition(x, HALF_H, z);
                 scene.add(tile.mesh);
@@ -90,8 +92,8 @@ async function buildDirectionShowcase(): Promise<void> {
     ];
     const z = 30;
     dirs.forEach((d, i) => {
-        const tile = new Tile3D(DEBUG_W, DEBUG_H, DEBUG_D);
-        tile.setTileCode('5p', cache);
+        const tile = new Tile3D(tileSet);
+        tile.setCode('5p', factory);
         const x = (i - (dirs.length - 1) / 2) * 45;
         tile.setPosition(x, HALF_H, z);
         tile.mesh.rotation.y = d.y;
@@ -104,8 +106,8 @@ async function buildSpecialForms(): Promise<void> {
     const z = 100;
 
     // Riichi discard: tile turned sideways (Y rotation by π/2).
-    const riichi = new Tile3D(DEBUG_W, DEBUG_H, DEBUG_D);
-    await riichi.setTileCode('1s', cache);
+    const riichi = new Tile3D(tileSet);
+    await riichi.setCode('1s', factory);
     riichi.setPosition(-35, HALF_H, z);
     riichi.mesh.rotation.y = Math.PI / 2;
     scene.add(riichi.mesh);
@@ -113,9 +115,9 @@ async function buildSpecialForms(): Promise<void> {
 
     // Face-down (暗杠): physically flip the tile so the back-design face
     // points up. Real identity E is remembered on userData for toggling.
-    const faceDown = new Tile3D(DEBUG_W, DEBUG_H, DEBUG_D);
+    const faceDown = new Tile3D(tileSet);
     faceDown.mesh.userData.tileCode = 'E';
-    await faceDown.setTileCode('E', cache);
+    await faceDown.setCode('E', factory);
     faceDown.setPosition(35, HALF_H, z);
     faceDown.flip();
     scene.add(faceDown.mesh);
@@ -144,8 +146,8 @@ gui.add(params, 'metalness', 0, 1, 0.01).onChange(applyMetalness);
 // Recolour the side gradient's bottom band and the back-design frame together.
 // Both textures are cached by colour, so picking a previously-used hue is free.
 gui.addColor(params, 'backColor').onChange(async (v: string) => {
-    const sideTex = cache.getSide(v);
-    const backTex = await cache.getBack(v);
+    const sideTex = factory.getSideTexture(v);
+    const backTex = await factory.getBackTexture(v);
     for (const t of allTiles) {
         t.setSideTexture(sideTex);
         t.setBottomTexture(backTex);
@@ -174,10 +176,10 @@ async function init() {
     await buildSpecialForms();
     // Apply the shared side gradient (cream top, gold bottom 3mm) to every
     // tile. Cached so a single canvas texture backs all tiles.
-    const sideTex = cache.getSide();
+    const sideTex = factory.getSideTexture();
     for (const t of allTiles) t.setSideTexture(sideTex);
     // Paint the back design onto every tile's -Y face.
-    await Promise.all(allTiles.map((t) => t.setBack(cache)));
+    await Promise.all(allTiles.map((t) => t.setBack(factory)));
     applyRoughness(params.roughness);
     applyMetalness(params.metalness);
 }

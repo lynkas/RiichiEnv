@@ -217,7 +217,8 @@ updateCamera();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = false;
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMappingExposure = lp.toneExposure;
 document.body.appendChild(renderer.domElement);
@@ -225,8 +226,17 @@ document.body.appendChild(renderer.domElement);
 // === Lighting (simple: one key light + ambient; no environment map so manual
 //                intensity controls remain responsive) ===
 const dirLight = new THREE.DirectionalLight(0xffffff, lp.mainLight);
-dirLight.position.set(0, 600, 0);
-dirLight.castShadow = false;
+dirLight.position.set(200, 800, 200);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.width = 2048;
+dirLight.shadow.mapSize.height = 2048;
+dirLight.shadow.camera.near = 1;
+dirLight.shadow.camera.far = 2000;
+dirLight.shadow.camera.left = -600;
+dirLight.shadow.camera.right = 600;
+dirLight.shadow.camera.top = 600;
+dirLight.shadow.camera.bottom = -600;
+dirLight.shadow.bias = -0.0005;
 scene.add(dirLight);
 
 const ambient = new THREE.AmbientLight(0x666666, lp.ambient);
@@ -346,7 +356,7 @@ function buildTable(): void {
 
     const cloth = new THREE.Mesh(new THREE.PlaneGeometry(lp.tableSize, lp.tableSize), tableMat);
     cloth.rotation.x = -Math.PI / 2;
-    cloth.receiveShadow = false;
+    cloth.receiveShadow = true;
     tableGroup.add(cloth);
 
     const zone = new THREE.Mesh(new THREE.PlaneGeometry(lp.tableSize, lp.tableSize), zoneMat);

@@ -27,10 +27,8 @@ export interface TileSetConfig {
     // --- Face (+Y) ---
     /** Cream lacquer base colour (shader uniform). Default 0xf0ebe0. */
     bgColor: number;
-    /** Stroke colour saturation multiplier. Default 1.8. */
-    colorBoost: number;
-    /** Glyph glow addend intensity. Default 0.5. */
-    glowIntensity: number;
+    /** Stroke colour saturation multiplier (>1 = more vivid, 1 = original, 0 = grayscale). Default 1.5. */
+    saturation: number;
 
     // --- Back (-Y) ---
     /** Back-design base / gold frame colour. Default 0xc8a030. */
@@ -59,15 +57,14 @@ const DEFAULT_CONFIG: TileSetConfig = {
     depth: 34,
     radius: 1.5,
 
-    bgColor: 0xf0ebe0,
-    colorBoost: 1.8,
-    glowIntensity: 0.5,
+    bgColor: 0xeef0f2,
+    saturation: 1.5,
 
     backColor: 0xc8a030,
 
-    sideTopColor: '#ddd5c0',
+    sideTopColor: '#e0e4e8',
     sideBottomColor: '#c8a030',
-    sideBottomHeight: 3,
+    sideBottomHeight: 6,
 
     svgBasePath: '/src/renderers/webgl/tile-svgs/',
     codeToFile: {

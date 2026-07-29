@@ -60,8 +60,7 @@ export class Tile3D {
             uniforms: {
                 texMap: { value: null },
                 bgColor: { value: new THREE.Color(c.bgColor) },
-                colorBoost: { value: c.colorBoost },
-                glowIntensity: { value: c.glowIntensity },
+                saturation: { value: c.saturation },
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -73,20 +72,21 @@ export class Tile3D {
             fragmentShader: `
                 uniform sampler2D texMap;
                 uniform vec3 bgColor;
-                uniform float colorBoost;
-                uniform float glowIntensity;
+                uniform float saturation;
                 varying vec2 vUv;
                 void main() {
                     vec4 tex = texture2D(texMap, vUv);
-                    vec3 base = mix(bgColor, tex.rgb * colorBoost, tex.a);
-                    vec3 glow = tex.rgb * tex.a * glowIntensity;
-                    gl_FragColor = vec4(base + glow, 1.0);
+                    float luma = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+                    vec3 vivid = mix(vec3(luma), tex.rgb, saturation);
+                    vec3 base = mix(bgColor, vivid, tex.a);
+                    gl_FragColor = vec4(base, 1.0);
+                    #include <colorspace_fragment>
                 }
             `,
         });
         // Bottom (-Y) face material: back-design texture set via
         // setBottomTexture. Coloured from the tileset's back colour.
-        const bottomMat = new THREE.MeshStandardMaterial({ color: c.backColor, roughness: 0.7, metalness: 0 });
+        const bottomMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1.0, metalness: 0, emissive: c.backColor, emissiveIntensity: 0.2 });
 
         // [+X, -X, +Y, -Y, +Z, -Z]
         this.materials = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];

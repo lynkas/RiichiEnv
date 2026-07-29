@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Tile3D } from '../src/renderers/webgl/tile3d.js';
-import { TextureCache } from '../src/renderers/webgl/textures.js';
+import { TileTextureFactory } from '../src/renderers/webgl/textures.js';
+import { TileSet } from '../src/renderers/webgl/tileset.js';
 import type { DealResult } from './deck.js';
 
 // ============================================================
@@ -92,11 +93,13 @@ export const SEAT_WINDS: Record<3 | 4, string[]> = {
 export class TableLayout {
     private group: THREE.Group | null = null;
     private readonly parent: THREE.Object3D;
-    private readonly cache: TextureCache;
+    private readonly factory: TileTextureFactory;
+    private readonly tileSet: TileSet;
 
-    constructor(parent: THREE.Object3D, cache: TextureCache) {
+    constructor(parent: THREE.Object3D, factory: TileTextureFactory) {
         this.parent = parent;
-        this.cache = cache;
+        this.factory = factory;
+        this.tileSet = new TileSet({ width: TILE_W, height: TILE_H, depth: TILE_D });
     }
 
     async build(dealData: DealResult, players: 3 | 4, dealer: number, riichiSeat: number): Promise<void> {
@@ -136,10 +139,10 @@ export class TableLayout {
     }
 
     private makeTile(code: string, tasks: Promise<void>[]): Tile3D {
-        const t = new Tile3D();
-        t.setSideTexture(this.cache.getSide());
-        tasks.push(t.setTileCode(code, this.cache));
-        tasks.push(t.setBack(this.cache));
+        const t = new Tile3D(this.tileSet);
+        t.setSideTexture(this.factory.getSideTexture());
+        tasks.push(t.setCode(code, this.factory));
+        tasks.push(t.setBack(this.factory));
         return t;
     }
 
