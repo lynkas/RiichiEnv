@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { setupDebugScene } from './base.js';
 import { Tile3D } from '../src/renderers/webgl/tile3d.js';
 import { TileTextureFactory } from '../src/renderers/webgl/textures.js';
@@ -125,23 +126,54 @@ async function buildSpecialForms(): Promise<void> {
 }
 
 // Material playground.
+//
+// metalness defaults to 0: mahjong tiles are plastic/bone composite, not metal.
+// A metallic tile turns its albedo into a reflection tint and drops diffuse to
+// near zero, so it renders entirely out of the environment map — with only
+// RoomEnvironment bound at low intensity that reads as dirty grey plastic. The
+// old 0.75 default was also applied to every material at init, which is why
+// this page looked so much worse than the table scene (where Tile3D's own
+// metalness: 0 stands).
 const params = {
-    roughness: 0.75,
-    metalness: 0.75,
+    roughness: 0.6,
+    metalness: 0,
+    rimIntensity: 0.35,
+    rimColor: '#9fc4ff',
+    saturation: 1.15,
     backColor: '#c8a030',
     rotateAll: 0,
     faceDown: false,
 };
 
+/** Tile materials are all MeshStandardMaterial; `materials` repeats one of them. */
+function forEachMaterial(fn: (m: THREE.MeshStandardMaterial) => void): void {
+    for (const t of allTiles) {
+        for (const m of new Set(t.materials)) fn(m as THREE.MeshStandardMaterial);
+    }
+}
+
 function applyRoughness(v: number) {
-    for (const t of allTiles) for (const m of t.materials) m.roughness = v;
+    forEachMaterial((m) => {
+        m.roughness = v;
+    });
 }
 function applyMetalness(v: number) {
-    for (const t of allTiles) for (const m of t.materials) m.metalness = v;
+    forEachMaterial((m) => {
+        m.metalness = v;
+    });
 }
 
 gui.add(params, 'roughness', 0, 1, 0.01).onChange(applyRoughness);
 gui.add(params, 'metalness', 0, 1, 0.01).onChange(applyMetalness);
+gui.add(params, 'rimIntensity', 0, 2, 0.01).name('rim intensity').onChange((v: number) => {
+    for (const t of allTiles) t.setRimIntensity(v);
+});
+gui.addColor(params, 'rimColor').name('rim colour').onChange((v: string) => {
+    for (const t of allTiles) t.setRimColor(v);
+});
+gui.add(params, 'saturation', 0, 2, 0.01).name('glyph saturation').onChange((v: number) => {
+    for (const t of allTiles) t.setGlyphSaturation(v);
+});
 
 // Recolour the side gradient's bottom band and the back-design frame together.
 // Both textures are cached by colour, so picking a previously-used hue is free.

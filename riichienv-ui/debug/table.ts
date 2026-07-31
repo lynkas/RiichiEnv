@@ -1,10 +1,20 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import GUI from 'lil-gui';
 import gsap from 'gsap';
-import { Tile3D } from '../src/renderers/webgl/tile3d.js';
+import {
+    Tile3D,
+    tileGeometryCacheSize,
+    setOutlineViewport,
+    setOutlineLightDirection,
+    setOutlineDepthRange,
+} from '../src/renderers/webgl/tile3d.js';
 import { TileTextureFactory } from '../src/renderers/webgl/textures.js';
 import { TileSet } from '../src/renderers/webgl/tileset.js';
+import { ContactShadows } from './contact_shadows.js';
+import { createPostChain, POST_DEFAULTS, type PostSettings } from './post.js';
+import { makeFeltDetailTexture, makeFeltNapNormalTexture } from './felt.js';
 
 // === Base tile dimensions (actual on-table size = BASE × tileScale) ===
 const BASE_TILE_W = 26;
@@ -38,13 +48,127 @@ const DEFAULTS = {
     riverWallRemaining: 12,
     riverMode: 'auto' as 'auto' | 'extend' | 'row4', // 'auto' = 自动判断 | 'extend' = 强制第三行延展 | 'row4' = 强制第四行
     opponentHandStand: true,
-    ambient: 1,
-    mainLight: 1,
-    hemiIntensity: 1.5,
-    hemiSkyColor: '#ffffff',
-    hemiGroundColor: '#444444',
-    tableColor: '#232a5c',
-    toneExposure: 1,
+    // --- 光照：一盏有明确方向的主光 + 一盏冷色补光。
+    //     不要再加白色补光去救暗面 —— 那会把明暗压平，正是「廉价感」的来源。
+    //     暗部的颜色由 hemi 的 sky/ground 和冷色补光给，不由额外的白光给。
+    ambient: 0.14,
+    mainLight: 1.6,
+    mainLightColor: '#fff8f0', // key light：只留一点暖，避免整体发黄
+    fillLight: 0.5,
+    fillLightColor: '#7fa6e8', // 冷色补光（对侧，制造冷暗部）
+    hemiIntensity: 0.4,
+    hemiSkyColor: '#dde3ee', // 天光：收掉一些蓝，避免把中性牌面染冷
+    hemiGroundColor: '#4a3a2c', // 桌面暖反弹
+    // overlay 手牌（独立正交场景）复用上面同一组光照值，只留一个整体倍率。
+    // 原来 handScene 只有一盏 AmbientLight —— 纯 ambient 完全均匀，牌面没有
+    // 任何明暗和高光。给它独立的强度数值是下一个坑：两个场景的参数会各自漂移，
+    // 你在桌面上调好的值搬到手牌就不对。手牌可以比桌面亮一点（它是 UI，要好
+    // 读），但那应该是一个刻意的倍率，不是另一套数字。
+    handLightBoost: 1.15,
+    tableColor: '#505a89', // 抬亮 + 降饱和。雀魂桌布实测 L=54.8 / B−R=+60，我们原来 38.8 / +70 —— 太暗太蓝
+    // exposure 回到 1.0，tone mapping 换 Neutral。ACESFilmic 压高光去饱和是为
+    // 写实电影设计的，二次元要的鲜艳色块会被它洗成灰的；exposure 0.5 又在上面
+    // 再压一档，然后逼着把灯堆亮来对抗 —— 两头打架。
+    toneExposure: 1.0,
+    // 材质 / 光照（GUI 🎨 材质 面板可调）
+    tileBgColor: 0xe4e4e1, // 牌面底色：中性近白。雀魂实测 RGB(220,220,218)，B−R=−2 —— 不是冷也不是暖
+    tileSaturation: 1.15, // 花色饱和度（现在在线性空间生效，>1.3 会截断）
+    tileRadius: 1.5, // 圆角半径（mm）
+    // Rim light 默认关：Fresnel 在掠射角最强（长方体上就是侧面），一直在和「侧面
+    // 该更暗」打对台；它是冷色的，也是最后一点偏蓝的来源；而参考图的牌边缘本来
+    // 就没有发光。它原本的作用——让牌从背景里浮出来——现在由描边接管了。
+    rimIntensity: 0, // Rim light 强度（uniform，实时生效）
+    rimColor: '#9fc4ff', // Rim light 颜色（uniform，实时生效）
+    // 笔画粗细分三档：默认 0.01，一二饼 0.015，三~九饼 0.018。
+    // 单一全局值行不通 —— 1饼/2饼是大圈、幺鸡笔画密，能救 9饼 的量会把它们糊成一坨。
+    // 逐牌型的绝对值在 tileset.ts 的 glyphWeightByCode。
+    glyphWeight: 0.01,
+    glyphWeightScale: 1, // 乘在解析出的粗细上，用来整体缩放而不打乱三档比例
+    faceRoughness: 0.45, // 牌面粗糙度：调高一点，收窄高光区域、压掉牌面反光感
+    useSdfGlyph: true, // 480×640 的场。桌面尺寸下贴图 mipmap 会把细笔画平均掉，字面发淡
+    // --- 硬边高光 ---
+    // 长方体上每个面 N·L 恒定、diffuse 本来就是平的，所以 ramp 没什么梯度可切；
+    // 宽软的 GGX 高光才是平面上唯一真正连续的东西，也就是「渲染感」的来源。
+    specHard: true,
+    specThreshold: 0.0065, // 实测校准：magenta 标记扫描出来的，估的 0.05 高了约 10 倍
+    specSoftness: 0.35,
+    specIntensity: 0,
+    specColor: '#eaf2ff',
+    specEnvScale: 0.06, // 环境高光是无形状的宽面反光，只能压不能硬化
+    inkSpecSuppress: 0.9, // 高光/rim 不打在笔画上 —— 高光是加性且与 albedo 无关，会把近黑笔画抬成灰
+    // --- Cel ramp（明暗阶跃化）---
+    // 在 diffuse 累加完成之后量化，所以是把整套灯（主光/冷补光/半球/环境/IBL）
+    // 的结果一起分区，而不是只 ramp 某一盏灯的 NdotL。默认只作用在牌面和牌背，
+    // 侧面保持连续 —— 侧面渐变是厚度感的来源。
+    ramp: true,
+    rampSides: false,
+    rampSteps: 3,
+    rampSoftness: 0.055,
+    rampFloor: 0.38,
+    rampRange: 1.25,
+    rampShadowTint: '#9fb0d8',
+    // --- 描边（inverted hull）---
+    // 逐牌的背面外扩壳，在「屏幕平面内」外扩、深度完全不动。线宽是 device px，
+    // 全画面恒定 —— 桌面牌和 3x 的 overlay 手牌线重一样，这才像墨线。
+    // 相邻牌之间会自然出现接缝线 —— 这是「粒粒分明」的来源。
+    outline: true,
+    outlineWidth: 3, // 描边线宽，单位 device px（屏幕空间恒定）
+    outlineColor: '#232830',
+    // 线宽跟着光照走：背光侧重、受光侧轻，再叠一层随距离变细。
+    // 完全均匀的线是「shader 画的」而不是「笔画的」最明显的破绽。
+    outlineShadowBoost: 1.45,
+    outlineLitScale: 0.55,
+    outlineFarScale: 0.7,
+    // 距离雾：给远端一点柔化和纵深。用它而不是 DOF —— BokehPass 要为深度多渲染
+    // 一遍整个场景，而 22.6° FOV 下 ~700mm 深的主体弥散圈极小，不值。
+    //
+    // 用「线性 Fog + near/far」而不是 FogExp2。指数雾的浓度是从相机起算的，
+    // 相机离桌子 1500 多，结果连近处的牌也被雾掉两成 —— 实测把近端牌从 216 拉到
+    // 186、中间调从 41.4% 打回 31.9%，把之前压值域的成果吃掉了。
+    // 线性雾的 near 落在最近的牌之前，近端零雾、只有远端起效。
+    fogNearScale: 0.82, // × cameraDistance
+    fogFarScale: 3.0, // × cameraDistance
+    fogColor: '#242c4a',
+    sideTopColor: '#c2c1bc', // 侧面色：中性，且明确比牌面暗（竖面吃光少，漆面更哑）
+    sideBottomColor: '#c8a030', // 侧面金色（hex string，addColor）
+    sideBottomHeight: 6, // 侧面金色高度（mm）
+    iblIntensity: 0.3, // IBL 环境贴图强度
+    showAxes: false, // 坐标轴 helper（默认关，评估画面时三根彩色柱会干扰判断）
+    feltDetail: true, // 桌布程序化纹理（斑驳 + 织纹 + 渐晕）
+    // 斑驳幅度。默认接近关闭 —— value noise 每个八度都是平滑团块，粗细同步增长，
+    // 实测粗/细比 1.14（绒毛只有 0.41），那就是「一块一块」。往上拖会重新出现斑块。
+    feltMottle: 0.02,
+    feltVignette: 0.22, // 桌布径向渐晕（体积感，不是噪声）
+    showZones: true, // 座位分区叠层（中性淡化后；关掉可对比）
+    // --- 桌布布料感 ---
+    // 法线贴图给绒毛的凹凸（漫反射对光的响应），sheen 给布料特有的掠射光泽。
+    // 光靠 albedo 变化只是「画上去的」，不会像布。
+    // 绒毛是唯一「只加细纹、不加粗结构」的东西 —— 实测粗/细比 0.41，而 detail map
+    // 的斑驳噪声是 1.14（粗≈细，那才是「一块一块」）。所以布料感靠绒毛，斑驳几乎关掉。
+    feltNap: 0.5, // 绒毛法线强度
+    // 8 而不是 22：repeat 22 时绒毛特征小于一个像素，亚像素的法线贴图只能产生噪声、
+    // 不可能像布。8 让中频特征落在 ~6px，是可分辨的织纹尺度。
+    feltNapRepeat: 8, // 绒毛平铺次数（越大绒毛越细）
+    // Sheen carries more than its own brightness: the lobe is normal-dependent, so
+    // it amplifies the nap normal map. Measured local cloth variation at the table's
+    // camera distance: flat colour 1.21, detail map 1.47, +nap at sheen 0.6 -> 1.79,
+    // but dropping sheen to 0.35 took it back to 1.54. Keep the sheen and re-level
+    // the cloth with `tableColor`, not by cutting it.
+    feltSheen: 0.6, // 布料掠射光泽强度
+    feltSheenRough: 0.75, // 光泽的粗糙度（越大越散）
+    feltSheenColor: '#93a6cf', // 光泽颜色
+    // --- 接触阴影 ---
+    // 牌底下一圈软阴影，贴在桌面上，与光照方向无关。见 contact_shadows.ts：
+    // 有角度的方向光只会投出斜影，而那盏灯同时负责形体明暗，两者必须解耦。
+    contactShadows: true,
+    contactShadowOpacity: 0.45,
+    contactShadowSpread: 1.3,
+    // shadow map 默认关：现在的接地感来自接触阴影。打开可以对比斜影。
+    castShadows: false,
+    // --- 金边发光（给 bloom 提供真正超过 1.0 的光源）---
+    goldEmissive: 2.4,
+    // --- 后处理 ---
+    ...POST_DEFAULTS,
 };
 
 // === Layout params (live-tunable via lil-gui → full rebuild) ===
@@ -132,7 +256,41 @@ function getDemoCode(): string {
 
 // === Scene ===
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0a14);
+/**
+ * Soft radial backdrop instead of a flat colour.
+ *
+ * Raising the black floor in the grade pass (see `lift` in post.ts) lifts the
+ * empty area outside the table too, and a flat fill turns into a conspicuous
+ * grey wedge in the corners. A gradient reads as an environment falling off into
+ * darkness rather than as an unpainted region — and an anime frame very rarely
+ * has a pure black void in it anyway.
+ */
+function makeBackdropTexture(): THREE.CanvasTexture {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('table: 2d context unavailable');
+    // Centred a little above the middle, roughly where the table sits.
+    const grad = ctx.createRadialGradient(size * 0.5, size * 0.42, size * 0.05, size * 0.5, size * 0.42, size * 0.72);
+    grad.addColorStop(0, '#2b3459');
+    grad.addColorStop(0.55, '#1a2038');
+    grad.addColorStop(1, '#0d1120');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    // UVMapping makes three draw it as a fitted full-screen backdrop rather
+    // than treating it as an environment projection.
+    texture.mapping = THREE.UVMapping;
+    return texture;
+}
+scene.background = makeBackdropTexture();
+// Linear haze toward the backdrop colour, bracketed so it starts just in front
+// of the nearest tile. Cheap depth separation, and the one genuinely soft thing
+// in the frame.
+scene.fog = new THREE.Fog(lp.fogColor, 1, 2);
 
 // === 坐标轴 helper（红=X, 绿=Y, 蓝=Z）===
 // 用圆柱体代替 AxesHelper 细线，避免远处闪烁。
@@ -164,6 +322,7 @@ zAxis.position.z = axisLength / 2;
 
 const axisGroup = new THREE.Group();
 axisGroup.add(xAxis, yAxis, zAxis);
+axisGroup.visible = lp.showAxes;
 scene.add(axisGroup);
 
 // === 轴向文字标签（CanvasTexture + Sprite，跟随坐标轴开关）===
@@ -189,6 +348,7 @@ const axisLabels: THREE.Sprite[] = [
     makeAxisLabel('Y', '#44ff44', [0, 165, 0]),
     makeAxisLabel('Z', '#4444ff', [0, 0, 165]),
 ];
+for (const label of axisLabels) label.visible = lp.showAxes;
 scene.add(...axisLabels);
 
 // === Camera (near top-down with a slight tilt) ===
@@ -210,6 +370,14 @@ function updateCamera(): void {
     camera.updateProjectionMatrix();
     camera.lookAt(0, lp.cameraTargetY, lp.cameraTargetZ);
     if (controlsReady) controls.target.set(0, lp.cameraTargetY, lp.cameraTargetZ);
+    // Thin-out range keyed off the camera distance, so orbiting or zooming does
+    // not leave every line pinned at one end of the falloff.
+    setOutlineDepthRange(lp.cameraDistance * 0.72, lp.cameraDistance * 1.28);
+    const fog = scene.fog as THREE.Fog | null;
+    if (fog) {
+        fog.near = lp.cameraDistance * lp.fogNearScale;
+        fog.far = lp.cameraDistance * lp.fogFarScale;
+    }
 }
 updateCamera();
 
@@ -217,17 +385,61 @@ updateCamera();
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// The outline shader converts its pixel width into clip space, so it needs the
+// drawing-buffer size. One shared uniform drives every tile.
+setOutlineViewport(
+    window.innerWidth * renderer.getPixelRatio(),
+    window.innerHeight * renderer.getPixelRatio(),
+);
+// Shadow mapping is off by default — grounding comes from the contact-shadow
+// decals instead (see contact_shadows.ts). Kept switchable so the slanted
+// cast-shadow look can be compared directly.
+renderer.shadowMap.enabled = lp.castShadows;
+// PCFSoftShadowMap is deprecated as of three r18x and silently falls back to
+// PCFShadowMap; VSM is the current soft option.
+renderer.shadowMap.type = THREE.VSMShadowMap;
+// Khronos PBR Neutral: keeps saturated colour blocks saturated instead of
+// rolling them off to grey the way ACESFilmic does. Applied by OutputPass at
+// the end of the post chain, not in the materials.
+renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMappingExposure = lp.toneExposure;
 document.body.appendChild(renderer.domElement);
 
-// === Lighting (simple: one key light + ambient; no environment map so manual
-//                intensity controls remain responsive) ===
-const dirLight = new THREE.DirectionalLight(0xffffff, lp.mainLight);
-dirLight.position.set(200, 800, 200);
+// === IBL: 程序化环境贴图（RoomEnvironment），给 MeshStandardMaterial 提供环境反射 ===
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+pmremGenerator.dispose();
+scene.environment = envTexture;
+scene.environmentIntensity = lp.iblIntensity;
+
+// === Lighting ===
+// Two directional lights, both with a purpose:
+//   key  — warm, steep, from the upper right. The only shadow caster.
+//   fill — cool, low, from the opposite side. Gives the dark side a *colour*
+//          instead of just lifting it, which is where the anime read comes
+//          from (warm light / cool shadow).
+// The previous setup had four white directionals (key + 3 fills) from four
+// directions plus ambient plus hemi. That is near-omnidirectional white light:
+// no gradient across any surface, no silhouette, no form. Needing three fills
+// to rescue the dark side is itself the tell that the key direction was never
+// chosen.
+const dirLight = new THREE.DirectionalLight(lp.mainLightColor, lp.mainLight);
+// Elevation ~72 degrees, not the ~50 it was.
+//
+// This is what removes the bright line along the bevel between the top face and
+// the sides. A rounded edge sweeps its normal from vertical to horizontal, so at a
+// 50-degree key a 45-degree stretch of bevel points almost straight at the light
+// and picks up N.L of 0.99 against the flat top's 0.77 — 29% more light than the
+// face it borders, on a *darker* albedo. Measured, the bevel ran 25 luma above the
+// top face. Raising the key so the flat top is the most-lit orientation in the
+// tile leaves nothing on the bevel able to beat it: the profile across the edge
+// goes flat (231/230) instead of spiking to 236.
+//
+// The azimuth is unchanged, so the warm-key / cool-fill split is intact; the sides
+// actually separate *better* (they drop from 156 to 144) because a steeper key
+// rakes them less.
+dirLight.position.set(420, 1588, 300);
 dirLight.castShadow = true;
 dirLight.shadow.mapSize.width = 2048;
 dirLight.shadow.mapSize.height = 2048;
@@ -238,28 +450,127 @@ dirLight.shadow.camera.right = 600;
 dirLight.shadow.camera.top = 600;
 dirLight.shadow.camera.bottom = -600;
 dirLight.shadow.bias = -0.0005;
+// Tiles are thin boxes lit at a grazing angle — normalBias does far more for
+// their self-shadowing acne than bias alone.
+dirLight.shadow.normalBias = 0.6;
 scene.add(dirLight);
 
-const ambient = new THREE.AmbientLight(0x666666, lp.ambient);
+const fillLight = new THREE.DirectionalLight(lp.fillLightColor, lp.fillLight);
+fillLight.position.set(-380, 240, -320);
+fillLight.castShadow = false;
+scene.add(fillLight);
+
+const ambient = new THREE.AmbientLight(0xa4aab6, lp.ambient);
 scene.add(ambient);
 
-// HemisphereLight: sky (up-facing) + ground (down-facing) for natural fill.
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, lp.hemiIntensity);
+// HemisphereLight: cool sky above, warm table bounce below.
+const hemiLight = new THREE.HemisphereLight(lp.hemiSkyColor, lp.hemiGroundColor, lp.hemiIntensity);
 scene.add(hemiLight);
 
 // === Shared materials for the rebuildable table layer ===
 // Geometry is recreated on every rebuild (tableSize changes), but materials
 // persist so the live cloth-colour / zone texture controls keep working.
-const tableMat = new THREE.MeshStandardMaterial({ color: lp.tableColor, roughness: 0.85 });
+// Cloth. Three things make it read as fabric rather than as a painted plane:
+//
+//  - `map` is a *detail* map (values around white), so `color` still carries the
+//    hue and the live cloth-colour control keeps working. Large-scale mottling.
+//  - `normalMap` is a tiled nap at fibre scale. This is the one that matters: paint
+//    and weave differ in how they respond to light, not in how they are coloured.
+//  - `sheen` is three's cloth lobe — a grazing-angle retroreflection that is
+//    exactly the "brushed baize catches the light near the far edge" look, and it
+//    cannot be faked with roughness.
+// `let`, not const: the detail map is baked into a canvas, so changing its
+// amplitude means regenerating and swapping the texture.
+let feltDetailTexture = makeFeltDetailTexture({
+    mottle: lp.feltMottle,
+    vignette: lp.feltVignette,
+});
+// What the current texture was actually baked with, so a rebuild can be skipped
+// when nothing relevant changed.
+let bakedFeltMottle = lp.feltMottle;
+let bakedFeltVignette = lp.feltVignette;
+const feltNapTexture = makeFeltNapNormalTexture();
+feltNapTexture.repeat.set(lp.feltNapRepeat, lp.feltNapRepeat);
+// Highest anisotropy the driver allows — see the note in felt.ts.
+feltNapTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+const tableMat = new THREE.MeshPhysicalMaterial({
+    color: lp.tableColor,
+    map: feltDetailTexture,
+    normalMap: feltNapTexture,
+    normalScale: new THREE.Vector2(lp.feltNap, lp.feltNap),
+    roughness: 0.92,
+    metalness: 0,
+    sheen: lp.feltSheen,
+    sheenRoughness: lp.feltSheenRough,
+    sheenColor: new THREE.Color(lp.feltSheenColor),
+});
+
+/**
+ * Rebuild the cloth detail map from `lp` and swap it in.
+ *
+ * The map is a baked canvas, so its amplitudes cannot be uniforms. The old
+ * texture is disposed rather than left to GC — it is a 1024^2 RGBA upload.
+ */
+function rebuildFeltDetail(): void {
+    const next = makeFeltDetailTexture({
+        mottle: lp.feltMottle,
+        vignette: lp.feltVignette,
+    });
+    feltDetailTexture.dispose();
+    feltDetailTexture = next;
+    bakedFeltMottle = lp.feltMottle;
+    bakedFeltVignette = lp.feltVignette;
+    if (lp.feltDetail) {
+        tableMat.map = feltDetailTexture;
+        tableMat.needsUpdate = true;
+    }
+}
+
+/**
+ * Rebuild only if the baked values are actually stale.
+ *
+ * Called from `applyVisuals`, which every light control also runs — regenerating a
+ * 1024^2 canvas on each of those would make the whole GUI feel broken. Routing it
+ * through here rather than binding the sliders straight to `rebuildFeltDetail` also
+ * means config import / load / reset pick the change up, which they otherwise
+ * would not: those paths set `lp` wholesale and call `applyVisuals`.
+ */
+function maybeRebuildFeltDetail(): void {
+    if (lp.feltMottle !== bakedFeltMottle || lp.feltVignette !== bakedFeltVignette) {
+        rebuildFeltDetail();
+    }
+}
 
 // Sync lighting / material values from lp back into the three.js objects.
 function applyVisuals(): void {
     ambient.intensity = lp.ambient;
     dirLight.intensity = lp.mainLight;
+    dirLight.color.set(lp.mainLightColor);
+    fillLight.intensity = lp.fillLight;
+    fillLight.color.set(lp.fillLightColor);
     hemiLight.intensity = lp.hemiIntensity;
     hemiLight.color.set(lp.hemiSkyColor);
     hemiLight.groundColor.set(lp.hemiGroundColor);
     tableMat.color.set(lp.tableColor);
+    applyHandLights();
+    maybeRebuildFeltDetail();
+    // Line weight follows the key light, so it has to track it.
+    setOutlineLightDirection(dirLight.position.x, dirLight.position.y, dirLight.position.z);
+    const fog = scene.fog as THREE.Fog | null;
+    if (fog) {
+        // Keyed off camera distance so orbiting does not push the table out of
+        // the fog band entirely.
+        fog.near = lp.cameraDistance * lp.fogNearScale;
+        fog.far = lp.cameraDistance * lp.fogFarScale;
+        fog.color.set(lp.fogColor);
+    }
+    borderMat.emissiveIntensity = lp.goldEmissive;
+    renderer.shadowMap.enabled = lp.castShadows;
+    contactShadows.setVisible(lp.contactShadows);
+    contactShadows.setOpacity(lp.contactShadowOpacity);
+    contactShadows.spread = lp.contactShadowSpread;
+    post.apply(lp as PostSettings);
+    refreshContactShadows();
 }
 
 // === Zone overlay layer (top, independent of cloth color) ===
@@ -276,52 +587,23 @@ function makeZoneTexture(): THREE.CanvasTexture {
 
     ctx.clearRect(0, 0, size, size);
 
-    // Four triangular seat regions split by two diagonals, alternating dark/light tints.
-    const dark = 'rgba(26, 58, 42, 0.15)';
-    const light = 'rgba(42, 90, 58, 0.08)';
-
-    // South (bottom triangle: base on the bottom edge, apex at center).
-    ctx.fillStyle = dark;
-    ctx.beginPath();
-    ctx.moveTo(0, size);
-    ctx.lineTo(size, size);
-    ctx.lineTo(half, half);
-    ctx.closePath();
-    ctx.fill();
-
-    // North (top triangle: base on the top edge, apex at center).
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(size, 0);
-    ctx.lineTo(half, half);
-    ctx.closePath();
-    ctx.fill();
-
-    // West (left triangle).
-    ctx.fillStyle = light;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(0, size);
-    ctx.lineTo(half, half);
-    ctx.closePath();
-    ctx.fill();
-
-    // East (right triangle).
-    ctx.beginPath();
-    ctx.moveTo(size, 0);
-    ctx.lineTo(size, size);
-    ctx.lineTo(half, half);
-    ctx.closePath();
-    ctx.fill();
-
-    // Central info rectangle (future: dora / score display).
-    const rectW = 120;
-    const rectH = 120;
-    ctx.fillStyle = 'rgba(58, 106, 74, 0.12)';
-    ctx.fillRect(half - rectW / 2, half - rectH / 2, rectW, rectH);
+    // Line work only — no tinted quadrants.
+    //
+    // This layer used to fill the four seat triangles and the central area with
+    // translucent green-grey. Two problems, and fixing the first exposed the
+    // second: over a blue cloth the green is a hue clash that reads as staining
+    // (it was the largest source of colour patchiness on the cloth, green-vs-blue
+    // balance spread 3.76 against 2.89 without it), and once the tints were made
+    // neutral the *value* steps became more obvious still — four flat patches with
+    // hard diagonal seams, which is worse.
+    //
+    // Zoning does not need fills. The reference art marks the table with thin
+    // inlay lines and leaves the cloth continuous, so that is what this draws.
+    const line = 'rgba(214, 226, 245, 0.10)';
+    const gold = 'rgba(212, 184, 128, 0.12)';
 
     // Two faint diagonals hinting the seat boundaries.
-    ctx.strokeStyle = 'rgba(200, 160, 48, 0.15)';
+    ctx.strokeStyle = line;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, 0);
@@ -330,8 +612,15 @@ function makeZoneTexture(): THREE.CanvasTexture {
     ctx.lineTo(0, size);
     ctx.stroke();
 
+    // Central discard area, outlined rather than filled.
+    const sq = size * 0.30;
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(half - sq / 2, half - sq / 2, sq, sq);
+
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 8;
     return texture;
 }
 
@@ -341,10 +630,20 @@ const zoneMat = new THREE.MeshBasicMaterial({
     depthWrite: false,
 });
 
-const borderMat = new THREE.MeshStandardMaterial({ color: 0xc8a030, roughness: 0.3, metalness: 0.6 });
+// Gold trim. `emissiveIntensity` is deliberately above 1.0: the bloom pass
+// thresholds at 1.0 in linear HDR, so this is what actually glows. Lit
+// surfaces stay below it and are left alone.
+const borderMat = new THREE.MeshStandardMaterial({
+    color: 0xc8a030,
+    roughness: 0.3,
+    metalness: 0.6,
+    emissive: 0xc8a030,
+    emissiveIntensity: lp.goldEmissive,
+});
 
 // === Rebuildable table layer (cloth + zone overlay + gold border bars) ===
 let tableGroup: THREE.Group | null = null;
+let zoneMesh: THREE.Mesh | null = null;
 
 function buildTable(): void {
     if (tableGroup) {
@@ -363,6 +662,8 @@ function buildTable(): void {
     const zone = new THREE.Mesh(new THREE.PlaneGeometry(lp.tableSize, lp.tableSize), zoneMat);
     zone.rotation.x = -Math.PI / 2;
     zone.position.y = 0.5; // sit just above the cloth to avoid z-fighting
+    zone.visible = lp.showZones;
+    zoneMesh = zone;
     tableGroup.add(zone);
 
     const barGeo = new THREE.BoxGeometry(lp.tableSize + 8, 4, 4);
@@ -384,6 +685,36 @@ function buildTable(): void {
 }
 buildTable();
 
+// === Contact shadows =====================================================
+// A soft pool under every tile that rests on the table. Footprints are read
+// from world-space bounding boxes, so flat / standing / sideways tiles all work
+// without special cases. One InstancedMesh, one draw call.
+const contactShadows = new ContactShadows(scene, {
+    opacity: lp.contactShadowOpacity,
+    spread: lp.contactShadowSpread,
+});
+
+// Rebuilt at most once per frame, on demand: tiles arrive asynchronously and
+// discards fly in under gsap, so positions are not final when they are created.
+let contactShadowsDirty = true;
+function refreshContactShadows(): void {
+    contactShadowsDirty = true;
+}
+
+/**
+ * Tile meshes belonging to the main scene. The overlay hand lives in its own
+ * screen-space scene hundreds of units below the table and must be excluded —
+ * otherwise its tiles pass the "resting on the table" test on a technicality
+ * and scatter shadow quads across the frame.
+ */
+function* tableTileMeshes(): Generator<THREE.Object3D> {
+    for (const tile of liveTiles) {
+        let root: THREE.Object3D = tile.mesh;
+        while (root.parent) root = root.parent;
+        if (root === scene) yield tile.mesh;
+    }
+}
+
 // === Four-seat layout (each rotated 90° around the table) ===
 // Seat order: 南 / 西 / 北 / 东. All positions below are in the local south
 // frame (+Z toward the south edge); the per-seat group rotation places them.
@@ -395,18 +726,143 @@ const DEMO_RIVER_COUNT = 24; // 演示极端牌河（>18 触发换行策略）
 
 const seatGroups: THREE.Group[] = [];
 
+// === Live tile registry ===
+// Every Tile3D currently in either scene. Two jobs:
+//   1. lets the material GUI drive shader uniforms (rim, saturation) on tiles
+//      that already exist, instead of rebuilding all ~140 of them per slider
+//      tick;
+//   2. gives rebuild() something to call dispose() on. Each Tile3D owns three
+//      MeshStandardMaterials with injected programs; the old teardown only
+//      disposed geometry, so every rebuild leaked ~420 materials — and almost
+//      every GUI control triggers a rebuild.
+const liveTiles = new Set<Tile3D>();
+
+function trackTile(tile: Tile3D): Tile3D {
+    liveTiles.add(tile);
+    return tile;
+}
+
+function forEachTile(fn: (tile: Tile3D) => void): void {
+    for (const tile of liveTiles) fn(tile);
+}
+
+/** Dispose and forget a single tile (geometry + its three materials). */
+function releaseTile(tile: Tile3D): void {
+    liveTiles.delete(tile);
+    tile.dispose();
+}
+
+/** Dispose every tracked tile. Textures are shared caches and survive. */
+function releaseAllTiles(): void {
+    for (const tile of liveTiles) tile.dispose();
+    liveTiles.clear();
+}
+
+/**
+ * TileSet spec for a tile of the given physical size, with every appearance
+ * value pulled from `lp`. `scale` only affects the corner radius, which is
+ * authored in base-tile mm and has to track the tile's size.
+ *
+ * Previously each of the six creation sites carried its own copy of this
+ * object literal, so a new appearance parameter meant editing six blocks.
+ */
+function tileSetFor(width: number, height: number, depth: number, scale: number): TileSet {
+    return new TileSet({
+        width,
+        height,
+        depth,
+        radius: lp.tileRadius * scale,
+        bgColor: lp.tileBgColor,
+        saturation: lp.tileSaturation,
+        faceRoughness: lp.faceRoughness,
+        sideTopColor: lp.sideTopColor,
+        sideBottomColor: lp.sideBottomColor,
+        sideBottomHeight: lp.sideBottomHeight,
+        rimIntensity: lp.rimIntensity,
+        rimColor: lp.rimColor,
+        useSdfGlyph: lp.useSdfGlyph,
+        glyphWeight: lp.glyphWeight,
+        glyphWeightScale: lp.glyphWeightScale,
+        specHard: lp.specHard,
+        specThreshold: lp.specThreshold,
+        specSoftness: lp.specSoftness,
+        specIntensity: lp.specIntensity,
+        specColor: lp.specColor,
+        specEnvScale: lp.specEnvScale,
+        inkSpecSuppress: lp.inkSpecSuppress,
+        ramp: lp.ramp,
+        rampSides: lp.rampSides,
+        rampSteps: lp.rampSteps,
+        rampSoftness: lp.rampSoftness,
+        rampFloor: lp.rampFloor,
+        rampRange: lp.rampRange,
+        rampShadowTint: lp.rampShadowTint,
+        outline: lp.outline,
+        outlineWidth: lp.outlineWidth,
+        outlineColor: lp.outlineColor,
+        outlineShadowBoost: lp.outlineShadowBoost,
+        outlineLitScale: lp.outlineLitScale,
+        outlineFarScale: lp.outlineFarScale,
+    });
+}
+
 // === 南家屏幕 overlay 手牌（独立正交场景，渲染在主画面之上）===
 // 南家手牌脱离桌面 3D 场景，用正交相机在屏幕空间底部居中绘制，
 // 牌大小由 handTileScale 控制（与桌面 tileScale 解耦）。
 const handScene = new THREE.Scene();
 const handCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
 handCamera.position.z = 100;
-const handAmbient = new THREE.AmbientLight(0xffffff, 1.2);
-handScene.add(handAmbient);
+
+// The overlay hand used to be lit by a single AmbientLight. Ambient is
+// perfectly uniform: a MeshStandardMaterial under it alone has no gradient, no
+// highlight, and its normals do nothing — the tiles come out as flat colour
+// swatches. These are the tiles the player looks at ~90% of the time, so they
+// need a real key direction like anything else.
+//
+// Rig and values mirror the table's (see applyHandLights): same warm key, same
+// cool directional fill, same hemisphere and environment. The tiles here are
+// rotated to face the camera, so the key sits up-and-left of the viewer to put
+// the gradient across the glyph face.
+const handAmbient = new THREE.AmbientLight(0x8fa8d8, 0);
+const handKeyLight = new THREE.DirectionalLight(0xffffff, 0);
+handKeyLight.position.set(-0.45, 0.85, 1);
+const handFillLight = new THREE.DirectionalLight(0xffffff, 0);
+handFillLight.position.set(0.7, -0.3, 0.6);
+const handHemiLight = new THREE.HemisphereLight(0xffffff, 0x000000, 0);
+handScene.add(handAmbient, handKeyLight, handFillLight, handHemiLight);
+handScene.environment = envTexture;
+handScene.environmentIntensity = lp.iblIntensity;
+
+// === Post-processing =====================================================
+// Bloom + colour grade over the table. The overlay hand is drawn separately, in
+// the render loop, straight to the canvas after the chain — see post.ts.
+const post = createPostChain(renderer, scene, camera);
+
+/**
+ * Push the table's lighting values into the overlay hand scene, scaled by
+ * `handLightBoost`. One set of numbers drives the whole picture, so the table
+ * and the overlay cannot drift apart.
+ */
+function applyHandLights(): void {
+    const k = lp.handLightBoost;
+    handKeyLight.intensity = lp.mainLight * k;
+    handKeyLight.color.set(lp.mainLightColor);
+    handFillLight.intensity = lp.fillLight * k;
+    handFillLight.color.set(lp.fillLightColor);
+    handAmbient.intensity = lp.ambient * k;
+    handHemiLight.intensity = lp.hemiIntensity * k;
+    handHemiLight.color.set(lp.hemiSkyColor);
+    handHemiLight.groundColor.set(lp.hemiGroundColor);
+}
 const cameraHandGroup = new THREE.Group();
 handScene.add(cameraHandGroup);
 // 南家 overlay 手牌 mesh 引用（用于 raycast 点击）
 const handTiles: THREE.Mesh[] = [];
+// The Tile3D behind each entry of `handTiles`, so teardown can go through
+// releaseTile. Disposing `mesh.geometry` directly is wrong now that geometry is
+// shared from a refcounted cache: the overlay tiles all share one entry, so the
+// first dispose frees a buffer the other seven are still drawing with.
+const handTileObjects: Tile3D[] = [];
 
 function updateHandCamera(): void {
     const w = window.innerWidth;
@@ -521,12 +977,12 @@ function calcRiverSlot(
 // lp.opponentHandStand is on; the south seat (0, incl. decoupled camera hand)
 // always lies flat.
 async function buildHand(target: THREE.Object3D, handZ: number, seat: number): Promise<void> {
-    const sideTex = factory.getSideTexture();
+    const sideTex = factory.getSideTexture(lp.sideBottomColor, lp.sideTopColor, lp.sideBottomHeight);
     const stand = lp.opponentHandStand && seat !== 0;
     const handCount = HAND_COUNT - MELDS_PER_SEAT * 3;
     const handLeftX = calcHandLeftX();
     for (let i = 0; i < handCount; i++) {
-        const tile = new Tile3D(new TileSet({ width: TILE_W, height: TILE_H, depth: TILE_D, radius: 1.5 * lp.tileScale }));
+        const tile = trackTile(new Tile3D(tileSetFor(TILE_W, TILE_H, TILE_D, lp.tileScale)));
         await tile.setCode(getDemoCode(), factory);
         tile.setSideTexture(sideTex);
         await tile.setBack(factory);
@@ -545,7 +1001,7 @@ async function buildHand(target: THREE.Object3D, handZ: number, seat: number): P
     }
     // Drawn (tsumo) tile: offset to the right of the closed hand with an extra gap.
     {
-        const tile = new Tile3D(new TileSet({ width: TILE_W, height: TILE_H, depth: TILE_D, radius: 1.5 * lp.tileScale }));
+        const tile = trackTile(new Tile3D(tileSetFor(TILE_W, TILE_H, TILE_D, lp.tileScale)));
         await tile.setCode(getDemoCode(), factory);
         tile.setSideTexture(sideTex);
         await tile.setBack(factory);
@@ -572,21 +1028,23 @@ function calcHandScale(): number {
 // handTileScale 控制（与桌面 tileScale 解耦），底部居中排列，摸牌带额外间距。
 // buildCameraHand 清空 cameraHandGroup 后重建；rebuild 时由 init() 调用。
 async function buildCameraHand(): Promise<void> {
-    // 清空旧手牌（dispose 几何体；材质 / 纹理为共享缓存，不释放）
-    for (const mesh of handTiles) {
-        cameraHandGroup.remove(mesh);
-        mesh.geometry.dispose();
+    // 清空旧手牌。走 releaseTile 而不是直接 dispose 几何体 —— 几何体来自引用计数的
+    // 共享缓存，直接 dispose 会释放其他 7 张牌还在用的顶点缓冲。
+    for (const tile of handTileObjects) {
+        tile.mesh.parent?.remove(tile.mesh);
+        releaseTile(tile);
     }
     handTiles.length = 0;
+    handTileObjects.length = 0;
 
     const hs = calcHandScale();
     const hw = BASE_TILE_W * hs;
     const hh = BASE_TILE_H * hs;
     const hd = BASE_TILE_D * hs;
-    const radius = 1.5 * hs;
+    const radius = lp.tileRadius * hs;
     const handStep = hw + 0.5 * hs;
     const handDrawnGap = hw * 0.35;
-    const sideTex = factory.getSideTexture();
+    const sideTex = factory.getSideTexture(lp.sideBottomColor, lp.sideTopColor, lp.sideBottomHeight);
 
     const handCount = HAND_COUNT - MELDS_PER_SEAT * 3;
     // 左对齐：以满手（13 闭合 + 1 tsumo）整体居中于 x=0 时的左边缘作为固定锚点。
@@ -599,7 +1057,7 @@ async function buildCameraHand(): Promise<void> {
     const y = -window.innerHeight / 2 + hd / 2 + bottomMargin;
 
     const placeTile = async (x: number): Promise<void> => {
-        const tile = new Tile3D(new TileSet({ width: hw, height: hh, depth: hd, radius }));
+        const tile = trackTile(new Tile3D(tileSetFor(hw, hh, hd, hs)));
         await tile.setCode(getDemoCode(), factory);
         tile.setSideTexture(sideTex);
         await tile.setBack(factory);
@@ -608,6 +1066,7 @@ async function buildCameraHand(): Promise<void> {
         tile.setPosition(x, y, 0);
         cameraHandGroup.add(tile.mesh);
         handTiles.push(tile.mesh);
+        handTileObjects.push(tile);
     };
 
     for (let i = 0; i < handCount; i++) {
@@ -621,11 +1080,11 @@ async function buildRiver(seatGroup: THREE.Group, seat: number): Promise<void> {
     // 南家（seat 0）牌河改为动态管理（addRiverTile / clearSouthRiver），
     // 由「🎬 牌河演示」面板逐张驱动，演示牌河增长 / 换行 / 延展全过程。
     if (seat === 0) return;
-    const sideTex = factory.getSideTexture();
+    const sideTex = factory.getSideTexture(lp.sideBottomColor, lp.sideTopColor, lp.sideBottomHeight);
     const stepX = TILE_W + lp.tileGap * lp.tileScale; // river column step (live-tunable; gap scales with tileScale)
     for (let i = 0; i < DEMO_RIVER_COUNT; i++) {
         const slot = calcRiverSlot(i, lp.riverWallRemaining, lp.riverMode);
-        const tile = new Tile3D(new TileSet({ width: TILE_W, height: TILE_H, depth: TILE_D, radius: 1.5 * lp.tileScale }));
+        const tile = trackTile(new Tile3D(tileSetFor(TILE_W, TILE_H, TILE_D, lp.tileScale)));
         await tile.setCode(getDemoCode(), factory);
         tile.setSideTexture(sideTex);
         // 牌河以 X=0 为中心对称排列；延展 col≥6 自然向右溢出（真实牌桌行为）。
@@ -679,8 +1138,8 @@ async function addRiverTile(
     const index = southRiver.length;
     const slot = calcRiverSlot(index, lp.riverWallRemaining, lp.riverMode);
 
-    const sideTex = factory.getSideTexture();
-    const tile = new Tile3D(new TileSet({ width: TILE_W, height: TILE_H, depth: TILE_D, radius: 1.5 * lp.tileScale }));
+    const sideTex = factory.getSideTexture(lp.sideBottomColor, lp.sideTopColor, lp.sideBottomHeight);
+    const tile = trackTile(new Tile3D(tileSetFor(TILE_W, TILE_H, TILE_D, lp.tileScale)));
     await tile.setCode(code, factory);
     tile.setSideTexture(sideTex);
     await tile.setBack(factory);
@@ -721,6 +1180,7 @@ async function addRiverTile(
         }
         sg.add(tile.mesh);
         southRiver.push({ code, tile, riichi });
+        refreshContactShadows();
         return;
     }
 
@@ -748,6 +1208,7 @@ async function addRiverTile(
                 tile.mesh.rotation.y = jitterAngle(seed);
                 tile.mesh.rotation.z = tiltAngle(seed);
             }
+            refreshContactShadows();
         },
     });
 
@@ -758,9 +1219,10 @@ async function addRiverTile(
 function clearSouthRiver(): void {
     for (const { tile } of southRiver) {
         tile.mesh.parent?.remove(tile.mesh);
-        tile.dispose();
+        releaseTile(tile);
     }
     southRiver.length = 0;
+    refreshContactShadows();
 }
 
 // === 南家副露演示（5 种副露类型：pon / chi / minkan / kakan / ankan）===
@@ -854,8 +1316,8 @@ async function createMeldGroup(
     const sidewaysZOffset = (tileD - tileW) / 2;
 
     // 共享缩小 TileSet（面 / 背 / 侧纹理来自全局 factory，与几何尺寸无关）
-    const meldTileSet = new TileSet({ width: tileW, height: tileH, depth: tileD, radius: 1.5 * meldTs });
-    const sideTex = factory.getSideTexture();
+    const meldTileSet = tileSetFor(tileW, tileH, tileD, meldTs);
+    const sideTex = factory.getSideTexture(lp.sideBottomColor, lp.sideTopColor, lp.sideBottomHeight);
     const specs = getMeldConfig(type);
 
     const tiles: Tile3D[] = [];
@@ -865,7 +1327,7 @@ async function createMeldGroup(
     let slot0X = 0; // slot 0 中心，供 kakan 第 4 张复用（X 相同）
     let firstSidewaysZ = 0; // 第 1 张横放牌中心 Z，供 kakan 第 4 张 Z 负方向紧贴
     for (const spec of specs) {
-        const tile = new Tile3D(meldTileSet);
+        const tile = trackTile(new Tile3D(meldTileSet));
         await tile.setCode(getDemoCode(), factory);
         tile.setSideTexture(sideTex);
         await tile.setBack(factory);
@@ -939,6 +1401,7 @@ async function addMeld(type: MeldType): Promise<void> {
 
     const { tiles } = await createMeldGroup(sg, type, groupStartX, meldTs, meldZ);
     southMelds.push({ type, tiles });
+    refreshContactShadows();
 }
 
 /** 清空南家副露：从父节点移除每张牌并释放几何体（材质 / 纹理为共享缓存，不释放）。 */
@@ -946,10 +1409,11 @@ function clearMelds(): void {
     for (const meld of southMelds) {
         for (const tile of meld.tiles) {
             tile.mesh.parent?.remove(tile.mesh);
-            tile.dispose();
+            releaseTile(tile);
         }
     }
     southMelds.length = 0;
+    refreshContactShadows();
 }
 
 /** 其他三家的静态副露类型（init 创建，覆盖全部 5 种副露以便调试）。 */
@@ -1031,25 +1495,31 @@ async function init(): Promise<void> {
             await addMeld(t);
         }
     }
+
+    refreshContactShadows();
 }
 
+/**
+ * Detach a seat group. Its meshes are all tile meshes, and their geometry and
+ * materials are released through the tile registry (releaseAllTiles), so there
+ * is nothing to dispose here.
+ */
 function disposeGroup(g: THREE.Object3D): void {
     scene.remove(g);
-    g.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) obj.geometry.dispose();
-    });
 }
 
 // === Rebuild: tear down the table, seats and decoupled hand, then reconstruct ===
 function rebuild(): void {
     for (const g of seatGroups) disposeGroup(g);
     seatGroups.length = 0;
-    // 清掉南家 overlay 手牌（不在 seatGroups 里，需单独清；几何体释放，材质 / 纹理共享）
-    for (const mesh of handTiles) {
-        cameraHandGroup.remove(mesh);
-        mesh.geometry.dispose();
-    }
+    // 清掉南家 overlay 手牌（不在 seatGroups 里，需单独从 cameraHandGroup 摘下）
+    for (const mesh of handTiles) cameraHandGroup.remove(mesh);
     handTiles.length = 0;
+    handTileObjects.length = 0;
+    // 释放所有牌的几何体 + 材质。必须在 init() 之前 —— init() 会用保存的
+    // code / type 序列重建南家牌河和副露，届时 southRiver / southMelds 里
+    // 还持有旧 Tile3D 引用。
+    releaseAllTiles();
     TILE_W = BASE_TILE_W * lp.tileScale;
     TILE_H = BASE_TILE_H * lp.tileScale;
     TILE_D = BASE_TILE_D * lp.tileScale;
@@ -1207,30 +1677,213 @@ visualFolder.add(lp, 'cameraZoom', 0.5, 3, 0.01).name('相机缩放').onChange(u
 visualFolder.add(lp, 'cameraTargetY', -500, 500, 1).name('目标 Y 偏移').onChange(updateCamera);
 visualFolder.add(lp, 'cameraTargetZ', -500, 500, 1).name('目标 Z 偏移').onChange(updateCamera);
 visualFolder.add(lp, 'cameraOffsetZ', -500, 500, 1).name('位置 Z 偏移').onChange(updateCamera);
-visualFolder.add(lp, 'ambient', 0, 20, 0.01).name('环境光').onChange((v: number) => {
-    ambient.intensity = v;
+// Every light control routes through applyVisuals so the table and the overlay
+// hand stay locked to the same values.
+visualFolder.add(lp, 'mainLight', 0, 6, 0.01).name('主光源 (暖)').onChange(applyVisuals);
+visualFolder.addColor(lp, 'mainLightColor').name('主光颜色').onChange(applyVisuals);
+visualFolder.add(lp, 'fillLight', 0, 3, 0.01).name('补光 (冷)').onChange(applyVisuals);
+visualFolder.addColor(lp, 'fillLightColor').name('补光颜色').onChange(applyVisuals);
+visualFolder.add(lp, 'ambient', 0, 5, 0.01).name('环境光').onChange(applyVisuals);
+visualFolder.add(lp, 'handLightBoost', 0.5, 2, 0.01).name('手牌亮度倍率').onChange(applyVisuals);
+visualFolder.addColor(lp, 'tableColor').name('桌布颜色').onChange(applyVisuals);
+visualFolder.add(lp, 'fogNearScale', 0.4, 1.2, 0.01).name('雾起点 ×距离').onChange(applyVisuals);
+visualFolder.add(lp, 'fogFarScale', 1.2, 6, 0.05).name('雾终点 ×距离').onChange(applyVisuals);
+visualFolder.addColor(lp, 'fogColor').name('雾色').onChange(applyVisuals);
+visualFolder.add(lp, 'showZones').name('座位分区叠层').onChange((v: boolean) => {
+    if (zoneMesh) zoneMesh.visible = v;
 });
-visualFolder.add(lp, 'mainLight', 0, 10, 0.01).name('主光源').onChange((v: number) => {
-    dirLight.intensity = v;
+visualFolder.add(lp, 'feltDetail').name('桌布纹理').onChange((v: boolean) => {
+    tableMat.map = v ? feltDetailTexture : null;
+    tableMat.needsUpdate = true; // toggles USE_MAP, so the program changes
 });
-visualFolder.addColor(lp, 'tableColor').name('桌布颜色').onChange((v: string) => {
-    tableMat.color.set(v);
+// Regenerating a 1024^2 canvas with per-pixel noise is too slow for every drag
+// tick, so these commit on release. `onChange` also fires so a drag still updates
+// `lp` live, and the staleness guard makes the eventual rebuild a no-op if the
+// value came back to where it started.
+visualFolder
+    .add(lp, 'feltMottle', 0, 0.15, 0.002)
+    .name('斑驳幅度')
+    .onFinishChange(maybeRebuildFeltDetail);
+visualFolder
+    .add(lp, 'feltVignette', 0, 0.6, 0.01)
+    .name('桌布渐晕')
+    .onFinishChange(maybeRebuildFeltDetail);
+visualFolder.add(lp, 'feltNap', 0, 3, 0.05).name('绒毛强度 ⚡').onChange((v: number) => {
+    tableMat.normalScale.set(v, v);
 });
-visualFolder.add(lp, 'hemiIntensity', 0, 20, 0.01).name('半球光强度').onChange((v: number) => {
-    hemiLight.intensity = v;
+visualFolder.add(lp, 'feltNapRepeat', 4, 60, 1).name('绒毛密度 ⚡').onChange((v: number) => {
+    feltNapTexture.repeat.set(v, v);
 });
-visualFolder.addColor(lp, 'hemiSkyColor').name('天空色').onChange((v: string) => {
-    hemiLight.color.set(v);
+visualFolder.add(lp, 'feltSheen', 0, 1.5, 0.02).name('布面光泽 ⚡').onChange((v: number) => {
+    tableMat.sheen = v;
 });
-visualFolder.addColor(lp, 'hemiGroundColor').name('地面色').onChange((v: string) => {
-    hemiLight.groundColor.set(v);
+visualFolder.add(lp, 'feltSheenRough', 0.05, 1, 0.02).name('光泽粗糙度 ⚡').onChange((v: number) => {
+    tableMat.sheenRoughness = v;
 });
-visualFolder.add(lp, 'toneExposure', 0.1, 3, 0.01).name('曝光').onChange((v: number) => {
-    renderer.toneMappingExposure = v;
+visualFolder.addColor(lp, 'feltSheenColor').name('光泽颜色 ⚡').onChange((v: string) => {
+    tableMat.sheenColor.set(v);
 });
-visualFolder.add({ showAxes: true }, 'showAxes').name('坐标轴').onChange((v: boolean) => {
+visualFolder.add(lp, 'hemiIntensity', 0, 4, 0.01).name('半球光强度').onChange(applyVisuals);
+visualFolder.addColor(lp, 'hemiSkyColor').name('天空色 (冷)').onChange(applyVisuals);
+visualFolder.addColor(lp, 'hemiGroundColor').name('地面色 (暖反弹)').onChange(applyVisuals);
+visualFolder.add(lp, 'showAxes').name('坐标轴').onChange((v: boolean) => {
     axisGroup.visible = v;
     for (const label of axisLabels) label.visible = v;
+});
+
+// === 硬边高光 ===
+const specFolder = gui.addFolder('💎 硬边高光');
+specFolder.close();
+specFolder.add(lp, 'specHard').name('硬边高光 ⚡').onChange((v: boolean) => {
+    forEachTile((t) => t.setSpecular({ hard: v }));
+});
+specFolder.add(lp, 'specThreshold', 0.002, 0.4, 0.002).name('阈值 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setSpecular({ threshold: v }));
+});
+specFolder.add(lp, 'specSoftness', 0.01, 1, 0.01).name('边缘柔度 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setSpecular({ softness: v }));
+});
+specFolder.add(lp, 'specIntensity', 0, 2, 0.01).name('高光亮度 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setSpecular({ intensity: v }));
+});
+specFolder.addColor(lp, 'specColor').name('高光颜色 ⚡').onChange((v: string) => {
+    forEachTile((t) => t.setSpecular({ color: v }));
+});
+specFolder.add(lp, 'specEnvScale', 0, 1.5, 0.01).name('环境高光 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setSpecular({ envScale: v }));
+});
+specFolder.add(lp, 'inkSpecSuppress', 0, 1, 0.02).name('笔画不吃高光 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setSpecular({ inkSuppress: v }));
+});
+
+// === Cel ramp ===
+// 除「侧面也阶跃」外全部是 uniform，实时生效。
+const rampFolder = gui.addFolder('🎞️ 明暗阶跃');
+rampFolder.close();
+rampFolder.add(lp, 'ramp').name('阶跃化 ⚡').onChange((v: boolean) => {
+    forEachTile((t) => t.setRamp({ enabled: v }));
+});
+rampFolder.add(lp, 'rampSteps', 1, 6, 1).name('阶数 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setRamp({ steps: v }));
+});
+rampFolder.add(lp, 'rampSoftness', 0.002, 0.3, 0.002).name('边缘柔度 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setRamp({ softness: v }));
+});
+rampFolder.add(lp, 'rampFloor', 0.2, 1, 0.01).name('暗部下限 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setRamp({ floor: v }));
+});
+rampFolder.add(lp, 'rampRange', 0.3, 1.5, 0.01).name('亮部参考 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setRamp({ range: v }));
+});
+rampFolder.addColor(lp, 'rampShadowTint').name('暗部色调 ⚡').onChange((v: string) => {
+    forEachTile((t) => t.setRamp({ shadowTint: v }));
+});
+rampFolder.add(lp, 'rampSides').name('侧面也阶跃（重建）').onChange(rebuild);
+
+// === 描边 ===
+// 全部实时生效（宽度/颜色是 uniform，开关是 mesh.visible），不触发 rebuild。
+const outlineFolder = gui.addFolder('✒️ 描边');
+outlineFolder.close();
+outlineFolder.add(lp, 'outline').name('描边 ⚡').onChange((v: boolean) => {
+    forEachTile((t) => t.setOutlineEnabled(v));
+});
+outlineFolder.add(lp, 'outlineWidth', 0, 8, 0.1).name('线宽 (device px) ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setOutlineWidth(v));
+});
+outlineFolder.add(lp, 'outlineShadowBoost', 0.5, 3, 0.05).name('背光侧线重 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setOutlineWeighting({ shadowBoost: v }));
+});
+outlineFolder.add(lp, 'outlineLitScale', 0, 1.5, 0.05).name('受光侧线重 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setOutlineWeighting({ litScale: v }));
+});
+outlineFolder.add(lp, 'outlineFarScale', 0.2, 1.5, 0.05).name('远处线重 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setOutlineWeighting({ farScale: v }));
+});
+outlineFolder.addColor(lp, 'outlineColor').name('线色 ⚡').onChange((v: string) => {
+    forEachTile((t) => t.setOutlineColor(v));
+});
+
+// === 阴影 ===
+// 接触阴影 = 贴在桌面上的软光斑，与光照方向无关。shadow map = 有角度的斜影。
+// 两者可以单独开关，方便直接对比。
+const shadowFolder = gui.addFolder('🌑 阴影');
+shadowFolder.close();
+shadowFolder.add(lp, 'contactShadows').name('接触阴影').onChange(applyVisuals);
+shadowFolder.add(lp, 'contactShadowOpacity', 0, 1, 0.01).name('阴影浓度').onChange(applyVisuals);
+shadowFolder.add(lp, 'contactShadowSpread', 1, 2.2, 0.01).name('阴影扩散').onChange(applyVisuals);
+shadowFolder.add(lp, 'castShadows').name('斜向投影 (shadow map)').onChange(applyVisuals);
+
+// === 后处理 ===
+const postFolder = gui.addFolder('✨ 后处理');
+postFolder.close();
+postFolder.add(lp, 'enabled').name('启用后处理').onChange(applyVisuals);
+postFolder.add(lp, 'exposure', 0.1, 3, 0.01).name('曝光').onChange(applyVisuals);
+postFolder.add(lp, 'bloomStrength', 0, 2, 0.01).name('Bloom 强度').onChange(applyVisuals);
+postFolder.add(lp, 'bloomRadius', 0, 1.5, 0.01).name('Bloom 半径').onChange(applyVisuals);
+postFolder
+    .add(lp, 'bloomThreshold', 0, 2, 0.01)
+    .name('Bloom 阈值')
+    .onChange(applyVisuals);
+postFolder.add(lp, 'goldEmissive', 0, 4, 0.05).name('金边发光').onChange(applyVisuals);
+postFolder.add(lp, 'saturation', 0, 2, 0.01).name('饱和度').onChange(applyVisuals);
+postFolder.add(lp, 'contrast', 0.5, 2, 0.01).name('对比度').onChange(applyVisuals);
+postFolder.add(lp, 'contrastPivot', 0.01, 0.3, 0.005).name('对比支点').onChange(applyVisuals);
+postFolder.add(lp, 'lift', 0, 0.15, 0.002).name('抬黑场').onChange(applyVisuals);
+postFolder.add(lp, 'splitTone', 0, 0.5, 0.01).name('冷暖分离').onChange(applyVisuals);
+postFolder.add(lp, 'vignette', 0, 1, 0.01).name('暗角').onChange(applyVisuals);
+postFolder.add(lp, 'grain', 0, 0.05, 0.001).name('颗粒').onChange(applyVisuals);
+// Pass switches, for bisecting the chain when an artefact appears in it.
+postFolder.add(lp, 'bloomEnabled').name('· Bloom pass（默认关，见 post.ts）').onChange(applyVisuals);
+postFolder.add(lp, 'gradeEnabled').name('· 调色 pass').onChange(applyVisuals);
+postFolder.add(lp, 'smaaEnabled').name('· SMAA pass').onChange(applyVisuals);
+
+// === 材质 controls ===
+// Rim 强度 / Rim 颜色 / 花色饱和度 are shader uniforms, so they apply live to
+// every existing tile. Only the values baked into a texture or into the
+// geometry (side gradient, corner radius, face colour) still need a rebuild.
+const materialFolder = gui.addFolder('🎨 材质');
+materialFolder.close();
+materialFolder.addColor(lp, 'tileBgColor').name('牌面底色').onChange(rebuild);
+materialFolder.addColor(lp, 'sideTopColor').name('侧面cream色').onChange(rebuild);
+materialFolder.addColor(lp, 'sideBottomColor').name('侧面金色').onChange(rebuild);
+materialFolder.add(lp, 'tileSaturation', 0, 2, 0.01).name('花色饱和度 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setGlyphSaturation(v));
+});
+materialFolder.add(lp, 'rimIntensity', 0, 2, 0.01).name('Rim强度 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setRimIntensity(v));
+});
+materialFolder.addColor(lp, 'rimColor').name('Rim颜色 ⚡').onChange((v: string) => {
+    forEachTile((t) => t.setRimColor(v));
+});
+materialFolder.add(lp, 'faceRoughness', 0, 1, 0.01).name('牌面粗糙度 ⚡').onChange((v: number) => {
+    forEachTile((t) => {
+        (t.materials[2] as THREE.MeshStandardMaterial).roughness = v;
+    });
+});
+materialFolder
+    .add(lp, 'useSdfGlyph')
+    .name('SDF 花色边缘 ⚡')
+    .onChange((v: boolean) => {
+        // The field itself is only fetched when a tile is built with SDF on, so
+        // switching it on for the first time needs a rebuild; switching off is
+        // just a uniform.
+        if (v) rebuild();
+        else forEachTile((t) => t.setSdfEnabled(false));
+    });
+materialFolder.add(lp, 'glyphWeight', -0.05, 0.08, 0.001).name('笔画粗细(默认档) ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setGlyphWeight(v));
+});
+materialFolder.add(lp, 'glyphWeightScale', 0, 2.5, 0.05).name('粗细整体倍率 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setGlyphWeightScale(v));
+});
+materialFolder.add(lp, 'tileRadius', 0.5, 5, 0.1).name('圆角半径').onChange(rebuild);
+materialFolder.add(lp, 'sideBottomHeight', 1, 15, 0.5).name('侧面金色高度').onChange(rebuild);
+materialFolder.add(lp, 'iblIntensity', 0, 3, 0.05).name('IBL强度 ⚡').onChange((v: number) => {
+    scene.environmentIntensity = v;
+    handScene.environmentIntensity = v;
+});
+materialFolder.add(lp, 'toneExposure', 0.1, 3, 0.01).name('曝光 ⚡').onChange((v: number) => {
+    renderer.toneMappingExposure = v;
 });
 
 // === 布局 controls (live table / hand / river / tile tuning; triggers a full rebuild) ===
@@ -1313,6 +1966,39 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     void addRiverTile(undefined, false, true);
 });
 
+// === Debug handle ===
+// Exposed so the scene can be inspected and driven from the console (and by
+// screenshot tooling) without reaching into lil-gui's DOM.
+(window as unknown as Record<string, unknown>).__tableDebug = {
+    scene,
+    handScene,
+    camera,
+    handCamera,
+    renderer,
+    controls,
+    lights: {
+        dirLight,
+        fillLight,
+        ambient,
+        hemiLight,
+        handKeyLight,
+        handFillLight,
+        handAmbient,
+        handHemiLight,
+    },
+    lp,
+    liveTiles,
+    contactShadows,
+    post,
+    tileGeometryCacheSize,
+    rebuild,
+    rebuildFeltDetail,
+    maybeRebuildFeltDetail,
+    applyVisuals,
+    updateCamera,
+    syncGUI,
+};
+
 // === Resize ===
 let resizeTimer: number | null = null;
 window.addEventListener('resize', () => {
@@ -1320,26 +2006,63 @@ window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    post.setSize(window.innerWidth, window.innerHeight);
+    setOutlineViewport(
+        window.innerWidth * renderer.getPixelRatio(),
+        window.innerHeight * renderer.getPixelRatio(),
+    );
     updateHandCamera();
 
-    // debounce rebuild（200ms 后才重建牌）
+    // Only the screen-space hand is relaid out — not the whole table.
+    //
+    // Nothing about the table depends on the viewport: seat layout, river, melds and
+    // walls are all in table millimetres. The only viewport-dependent thing is the
+    // overlay hand, whose Y comes from window.innerHeight. Rebuilding everything
+    // meant a resize threw away 131 tiles and rebuilt them — measured at a 90ms
+    // stall, i.e. 5-11 dropped frames, during which the canvas shows nothing and the
+    // page's near-black background (#050505) shows through. That is very likely the
+    // black flash seen while dragging a window.
     if (resizeTimer) clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => rebuild(), 200);
+    resizeTimer = window.setTimeout(() => {
+        void buildCameraHand().catch((err) => console.error('[table] hand relayout failed:', err));
+    }, 120);
 });
 
 // === Render loop ===
-// 主场景 + 南家 overlay 手牌场景叠加渲染。autoClear 关闭，手动清除：
-// 先清颜色 + 深度画主场景，再清深度画 overlay 手牌（保留主画面颜色）。
-renderer.autoClear = false;
+// 主场景 + overlay 手牌都交给 EffectComposer（两个 RenderPass，第二个
+// clear=false / clearDepth=true），所以不再需要手动 autoClear 双渲染。
+// 关掉 post 时退回直接渲染，用于对比。
 function animate(): void {
     requestAnimationFrame(animate);
     controls.update();
-    renderer.clear();
-    renderer.render(scene, camera);
-    renderer.clearDepth();
-    renderer.render(handScene, handCamera);
+
+    if (contactShadowsDirty) {
+        contactShadows.update(tableTileMeshes());
+        contactShadowsDirty = false;
+    }
+
+    if (lp.enabled) {
+        renderer.autoClear = true;
+        post.composer.render();
+        // Overlay hand straight to the canvas, outside the composer. Depth is
+        // cleared so it always draws in front; colour is kept so the graded table
+        // stays underneath.
+        renderer.autoClear = false;
+        renderer.clearDepth();
+        renderer.render(handScene, handCamera);
+    } else {
+        renderer.autoClear = false;
+        renderer.clear();
+        renderer.render(scene, camera);
+        renderer.clearDepth();
+        renderer.render(handScene, handCamera);
+    }
 }
 animate();
+
+// Push lp into the scene once at startup — the overlay hand's lights start at
+// intensity 0 and are driven entirely from here.
+applyVisuals();
 
 init()
     .then(async () => {

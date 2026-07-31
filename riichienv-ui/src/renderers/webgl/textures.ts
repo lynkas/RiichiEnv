@@ -28,11 +28,11 @@ export class TileTextureFactory {
     private readonly h: number;
 
     /** SDF source resolution (3:4 to match the face). */
-    private static readonly SDF_W = 192;
-    private static readonly SDF_H = 256;
+    private static readonly SDF_W = 480;
+    private static readonly SDF_H = 640;
     /** Half-range of the signed distance field, in source pixels. Strokes
      * thinner than this still render sharp; beyond it the field saturates. */
-    private static readonly SDF_SPREAD = 24;
+    private static readonly SDF_SPREAD = 60;
 
     // Canvas aspect must match the SVG viewBox (300×400 = 3:4). A square
     // canvas letterboxes the portrait glyph, leaving transparent margins that
@@ -256,11 +256,20 @@ export class TileTextureFactory {
      * hard line. Cached under the resolved colour so every tile shares one
      * canvas texture.
      *
-     * `bottomColor` defaults to the tileset's `sideBottomColor`; passing an
-     * explicit value (used by debug recolour GUIs) is cached independently.
+     * All three appearance inputs are overridable and all three are part of the
+     * cache key. They have to be: this factory is normally constructed once with a
+     * *default* TileSet, so anything read straight off `this.tileSet.config` is
+     * fixed at the default regardless of what a caller has configured — and with
+     * only `bottomColor` in the key, a caller that did vary the top colour or band
+     * height would silently get the first texture built. Between the two, the
+     * side-colour controls in the debug GUI had no effect at all.
      */
-    getSideTexture(bottomColor: string = this.tileSet.config.sideBottomColor): THREE.CanvasTexture {
-        const key = `__side_${bottomColor}__`;
+    getSideTexture(
+        bottomColor: string = this.tileSet.config.sideBottomColor,
+        topColor: string = this.tileSet.config.sideTopColor,
+        bottomHeight: number = this.tileSet.config.sideBottomHeight,
+    ): THREE.CanvasTexture {
+        const key = `__side_${bottomColor}_${topColor}_${bottomHeight}__`;
         const cached = this.sideCache.get(key);
         if (cached) return cached;
 
@@ -274,17 +283,17 @@ export class TileTextureFactory {
         if (!ctx) throw new Error('TileTextureFactory: 2d context unavailable');
 
         // Upper lacquer body.
-        ctx.fillStyle = c.sideTopColor;
+        ctx.fillStyle = topColor;
         ctx.fillRect(0, 0, w, h);
 
         // Coloured lacquer bottom band.
-        const bandH = h * (c.sideBottomHeight / c.height);
+        const bandH = h * (bottomHeight / c.height);
         ctx.fillStyle = bottomColor;
         ctx.fillRect(0, h - bandH, w, bandH);
 
         // 2px soft transition for a natural painted boundary.
         const grad = ctx.createLinearGradient(0, h - bandH - 2, 0, h - bandH);
-        grad.addColorStop(0, c.sideTopColor);
+        grad.addColorStop(0, topColor);
         grad.addColorStop(1, bottomColor);
         ctx.fillStyle = grad;
         ctx.fillRect(0, h - bandH - 2, w, 2);

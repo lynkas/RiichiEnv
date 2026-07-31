@@ -36,7 +36,9 @@ export function setupDebugScene(container: HTMLElement): DebugScene {
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // Matches table.ts — see the note there on why not ACESFilmic.
+    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMappingExposure = 1.0;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
 
@@ -45,9 +47,9 @@ export function setupDebugScene(container: HTMLElement): DebugScene {
     controls.dampingFactor = 0.08;
     controls.target.set(0, 0, 0);
 
-    // Key light (shadow caster)
-    const dirLight = new THREE.DirectionalLight(0xfff5e6, 0.8);
-    dirLight.position.set(200, 400, 200);
+    // Key light (shadow caster), warm
+    const dirLight = new THREE.DirectionalLight(0xfff2e0, 2.0);
+    dirLight.position.set(240, 460, 220);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
@@ -57,11 +59,20 @@ export function setupDebugScene(container: HTMLElement): DebugScene {
     dirLight.shadow.camera.right = 500;
     dirLight.shadow.camera.top = 500;
     dirLight.shadow.camera.bottom = -500;
+    dirLight.shadow.normalBias = 0.6;
     scene.add(dirLight);
 
-    // Fill
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
+    // Cool fill from the opposite side, so the dark side has a colour rather
+    // than just a level. Same warm-key / cool-fill split as table.ts.
+    const fillLight = new THREE.DirectionalLight(0x7fa6e8, 0.5);
+    fillLight.position.set(-220, 200, -240);
+    scene.add(fillLight);
+
+    const ambientLight = new THREE.AmbientLight(0x8fa8d8, 0.16);
     scene.add(ambientLight);
+
+    const hemiLight = new THREE.HemisphereLight(0xcfe0ff, 0x4a3a2c, 0.4);
+    scene.add(hemiLight);
 
     // Image-based lighting for subtle reflections on tile faces
     const pmremGen = new THREE.PMREMGenerator(renderer);
