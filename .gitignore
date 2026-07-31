@@ -10,3 +10,5 @@ riichienv-ml-xt/
 debug-riichienv-with-mortal
 mjsoul-parser
 **/.ipynb_checkpoints
+**/.DS_Store
+.playwright-cli/
