@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TILES } from '../../tiles';
+import { TILES } from '../../otiles';
 import type { TileSet } from './tileset.js';
 
 /** Convert a numeric 0xRRGGBB colour to a CSS '#rrggbb' string. */
