@@ -19,19 +19,18 @@ import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
  *    everything is already clamped and thresholded bloom either does nothing
  *    or fogs the whole frame.
  *
- * 2. **Antialiasing via SMAA, not MSAA.** EffectComposer bypasses the default
+ * 2. **Antialiasing via MSAA + SMAA.** EffectComposer bypasses the default
  *    framebuffer, so the `antialias: true` passed to WebGLRenderer stops applying,
  *    and adding post-processing without replacing it makes the image *worse* — the
  *    classic "why is it aliased now" trap.
  *
- *    The obvious replacement is `samples: 4` on the composer's target, and that is
- *    what this used at first. It was dropped: a multisampled *float* target, swapped
- *    between two buffers and resolved every frame, is a fragile combination in
- *    three, and a resolve whose blit region goes wrong shows up as a rectangular
- *    block of the frame going stale or black — which is exactly the intermittent
- *    artefact reported here (a true rectangle, screen-aligned, unrelated to any
- *    scene geometry, appearing while the camera moves). SMAA is a shader pass on an
- *    ordinary target, so there is no multisample resolve to go wrong.
+ *    `samples: 4` on the composer's target is the obvious replacement. It was
+ *    dropped at one point on suspicion that a multisampled float target, swapped
+ *    between two buffers and resolved every frame, was behind an intermittent
+ *    screen-aligned rectangle going black. Later bisection pinned that artefact
+ *    on UnrealBloomPass instead (now off by default — see `bloomEnabled`), so
+ *    MSAA is re-enabled. SMAA stays on top of it, after tone mapping: MSAA only
+ *    helps geometry edges, not the shader-driven edges inside tiles.
  *
  * 3. **Threshold instead of a selective-bloom pass.** Proper selective bloom
  *    means rendering the scene a second time with every non-glowing material
@@ -276,7 +275,13 @@ export function createPostChain(
 ): PostChain {
     const size = renderer.getSize(new THREE.Vector2());
     const pixelRatio = renderer.getPixelRatio();
-    const internalRatio = Math.max(pixelRatio, 1.5);
+    // Floor of 2, not 1.5: at DPR=1 a 1.5x buffer ends in a 1.5:1 *fractional*
+    // bilinear downsample on the final pass, which undersamples and shows up as
+    // moire/jaggies on 1080p screens (and runs SMAA at the wrong resolution).
+    // 2x is an integer ratio, so the 2:1 downsample approximates a box filter —
+    // effectively 2x SSAA. At DPR=2 the ratio is already 2, so nothing changes
+    // on 2K/Retina screens, which is why the artefact only appeared at 1080p.
+    const internalRatio = Math.max(pixelRatio, 2);
 
     const target = new THREE.WebGLRenderTarget(
         size.x * internalRatio,
@@ -284,6 +289,10 @@ export function createPostChain(
         {
             type: THREE.HalfFloatType,
             colorSpace: THREE.LinearSRGBColorSpace,
+            // MSAA x4. Previously dropped as the suspect for the black-rectangle
+            // artefact; bisection later blamed UnrealBloomPass instead, so this
+            // is safe to re-enable while bloom stays off by default.
+            samples: 4,
         },
     );
 
@@ -338,7 +347,8 @@ export function createPostChain(
         gradePass,
         smaaPass,
         setSize(width, height) {
-            const ratio = Math.max(renderer.getPixelRatio(), 1.5);
+            // Same 2x floor as the constructor — see internalRatio above.
+            const ratio = Math.max(renderer.getPixelRatio(), 2);
             composer.setPixelRatio(ratio);
             composer.setSize(width, height);
         },
