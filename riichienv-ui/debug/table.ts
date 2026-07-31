@@ -134,6 +134,11 @@ const DEFAULTS = {
     sideTopColor: '#c2c1bc', // 侧面色：中性，且明确比牌面暗（竖面吃光少，漆面更哑）
     sideBottomColor: '#c8a030', // 侧面金色（hex string，addColor）
     sideBottomHeight: 6, // 侧面金色高度（mm）
+    // 立牌顶部窄条提亮：世界法线朝上的侧面片元 albedo 向牌面底色 lerp。
+    // 侧面刻意比牌面暗的前提是「侧面竖直」；立牌顶部那条窄面转成水平朝天，
+    // 吃着和牌面一样的顶光却仍用暗 albedo —— 提亮回牌面色才是它物理上该有的亮度。
+    sideTopLift: 0.9, // 提亮强度（0=关闭，1=完全变成目标色）
+    sideTopLiftColor: '#e4e4e1', // 提亮目标色（默认 = 牌面底色）
     iblIntensity: 0.3, // IBL 环境贴图强度
     showAxes: false, // 坐标轴 helper（默认关，评估画面时三根彩色柱会干扰判断）
     feltDetail: true, // 桌布程序化纹理（斑驳 + 织纹 + 渐晕）
@@ -787,6 +792,8 @@ function tileSetFor(width: number, height: number, depth: number, scale: number)
         sideTopColor: lp.sideTopColor,
         sideBottomColor: lp.sideBottomColor,
         sideBottomHeight: lp.sideBottomHeight,
+        sideTopLift: lp.sideTopLift,
+        sideTopLiftColor: lp.sideTopLiftColor,
         rimIntensity: lp.rimIntensity,
         rimColor: lp.rimColor,
         useSdfGlyph: lp.useSdfGlyph,
@@ -1857,6 +1864,12 @@ materialFolder.close();
 materialFolder.addColor(lp, 'tileBgColor').name('牌面底色').onChange(rebuild);
 materialFolder.addColor(lp, 'sideTopColor').name('侧面cream色').onChange(rebuild);
 materialFolder.addColor(lp, 'sideBottomColor').name('侧面金色').onChange(rebuild);
+materialFolder.add(lp, 'sideTopLift', 0, 1, 0.01).name('朝上侧面提亮 ⚡').onChange((v: number) => {
+    forEachTile((t) => t.setSideTopLift({ strength: v }));
+});
+materialFolder.addColor(lp, 'sideTopLiftColor').name('提亮目标色 ⚡').onChange((v: string) => {
+    forEachTile((t) => t.setSideTopLift({ color: v }));
+});
 materialFolder.add(lp, 'tileSaturation', 0, 2, 0.01).name('花色饱和度 ⚡').onChange((v: number) => {
     forEachTile((t) => t.setGlyphSaturation(v));
 });

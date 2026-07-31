@@ -170,6 +170,26 @@ export interface TileSetConfig {
     sideBottomColor: string;
     /** Height (mm) of the coloured bottom band on the sides. Default 3. */
     sideBottomHeight: number;
+    /**
+     * How far a side fragment whose *world* normal points up is lifted toward
+     * `sideTopLiftColor`, 0..1. Default 0.9.
+     *
+     * The deliberate "sides darker than the face" design assumes the sides are
+     * vertical (see `sideTopColor`). A standing hand tile breaks that
+     * assumption: its top narrow strip is a side face rotated horizontal, so it
+     * receives the same overhead key as the glyph faces yet keeps the dimmer
+     * side albedo. Lifting the albedo where the world normal is up
+     * (smoothstep 0.5→0.9) restores what the surface would look like had it
+     * been authored as a top face. Vertical sides (flat tiles, wall, river)
+     * sit at normal.y = 0 and are completely untouched.
+     */
+    sideTopLift: number;
+    /**
+     * Target colour of the upward-side lift, in any form `THREE.Color` accepts.
+     * Default 0xe4e4e1 — same as `bgColor`, because a physically horizontal
+     * strip of lacquer should read exactly like the face.
+     */
+    sideTopLiftColor: number | string;
 
     // --- Hard-edged specular ---
     /**
@@ -363,6 +383,8 @@ const DEFAULT_CONFIG: TileSetConfig = {
     sideTopColor: '#c2c1bc',
     sideBottomColor: '#c8a030',
     sideBottomHeight: 6,
+    sideTopLift: 0.9,
+    sideTopLiftColor: 0xe4e4e1,
 
     specHard: true,
     specThreshold: 0.0065,

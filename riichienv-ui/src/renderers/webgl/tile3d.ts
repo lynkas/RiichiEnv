@@ -339,6 +339,10 @@ interface TileShaderUniforms {
     specEnvScale: { value: number };
     /** How strongly specular and rim are held off the glyph ink, 0..1. */
     inkSpecSuppress: { value: number };
+    /** 0..1 lift of upward-facing side fragments toward `sideTopLiftColor`. */
+    sideTopLift: { value: number };
+    /** Albedo target of the upward-side lift (side material only). */
+    sideTopLiftColor: { value: THREE.Color };
 }
 
 /**
@@ -359,7 +363,7 @@ interface TileShaderUniforms {
 function patchTileShader(
     mat: THREE.MeshStandardMaterial,
     uniforms: TileShaderUniforms,
-    opts: { glyph: boolean; ramp: boolean },
+    opts: { glyph: boolean; ramp: boolean; topLift: boolean },
 ): void {
     mat.onBeforeCompile = (shader) => {
         shader.uniforms.rimIntensity = uniforms.rimIntensity;
@@ -381,6 +385,8 @@ function patchTileShader(
         shader.uniforms.specColor = uniforms.specColor;
         shader.uniforms.specEnvScale = uniforms.specEnvScale;
         shader.uniforms.inkSpecSuppress = uniforms.inkSpecSuppress;
+        shader.uniforms.sideTopLift = uniforms.sideTopLift;
+        shader.uniforms.sideTopLiftColor = uniforms.sideTopLiftColor;
 
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <common>',
@@ -468,6 +474,52 @@ function patchTileShader(
                  diffuseColor.rgb = mix( diffuseColor.rgb, glyphVivid, glyphAlpha );
                  tileInkMask = glyphAlpha;`,
             );
+        }
+
+        if (opts.topLift) {
+            // 朝上侧面提亮（立牌顶部窄条）。
+            //
+            // 侧面的 albedo 刻意比牌面暗（见 tileset 的 sideTopColor），这个
+            // 设计假设侧面是竖直面。立牌 rotation.x = π/2 之后，牌盒的一条
+            // 窄侧面转成水平朝天，吃着和牌面一样的顶光却仍用暗 albedo，读作
+            // 一条脏边。物理上这条水平的漆面就该和牌面一样亮，所以把世界
+            // 法线朝上的片元 albedo lerp 向牌面底色。
+            //
+            // vNormal 是 view space，绕不开相机；世界法线在顶点着色器里用
+            // modelMatrix 变换（与描边材质的 worldNormal 同一写法），随
+            // rotation.x、座位旋转一起生效。
+            //
+            // smoothstep(0.5, 0.9)：normal.y ≤ 0.5 完全不动 —— 平放牌、牌墙、
+            // 舍牌的竖直侧面 y=0，不受影响；朝下的面贴桌看不见，不处理。
+            // 平放牌的顶部倒角弧会在 y>0.5 的最顶端一小段轻微提亮，那是
+            // 水平面，本来就该亮。
+            shader.vertexShader = shader.vertexShader
+                .replace(
+                    '#include <common>',
+                    `#include <common>
+                     varying vec3 vWorldNormal;`,
+                )
+                .replace(
+                    '#include <defaultnormal_vertex>',
+                    `#include <defaultnormal_vertex>
+                     vWorldNormal = normalize( mat3( modelMatrix ) * normal );`,
+                );
+
+            shader.fragmentShader = shader.fragmentShader
+                .replace(
+                    '#include <common>',
+                    `#include <common>
+                     uniform float sideTopLift;
+                     uniform vec3 sideTopLiftColor;
+                     varying vec3 vWorldNormal;`,
+                )
+                .replace(
+                    '#include <map_fragment>',
+                    `#include <map_fragment>
+                     float topLiftT = smoothstep( 0.5, 0.9, normalize( vWorldNormal ).y )
+                         * sideTopLift;
+                     diffuseColor.rgb = mix( diffuseColor.rgb, sideTopLiftColor, topLiftT );`,
+                );
         }
 
         if (opts.ramp) {
@@ -588,7 +640,7 @@ function patchTileShader(
     };
 
     mat.customProgramCacheKey = () =>
-        `tile3d-rim${opts.glyph ? '-glyph' : ''}${opts.ramp ? '-ramp' : ''}`;
+        `tile3d-rim${opts.glyph ? '-glyph' : ''}${opts.ramp ? '-ramp' : ''}${opts.topLift ? '-toplift' : ''}`;
 }
 export class Tile3D {
     mesh: THREE.Mesh;
@@ -644,13 +696,15 @@ export class Tile3D {
             specColor: { value: new THREE.Color(c.specColor) },
             specEnvScale: { value: c.specEnvScale },
             inkSpecSuppress: { value: c.inkSpecSuppress },
+            sideTopLift: { value: c.sideTopLift },
+            sideTopLiftColor: { value: new THREE.Color(c.sideTopLiftColor) },
         };
 
         // Side material: cream base, replaced by a cream→gold gradient `map`
         // (set via setSideTexture). White colour so the map renders
         // unmultiplied.
         const sideMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0 });
-        patchTileShader(sideMat, this.shaderUniforms, { glyph: false, ramp: c.rampSides });
+        patchTileShader(sideMat, this.shaderUniforms, { glyph: false, ramp: c.rampSides, topLift: true });
 
         // Top (+Y) face material: cream lacquer + SVG glyph, composited over
         // the base colour by the patched `map_fragment` chunk. A lit material
@@ -661,7 +715,7 @@ export class Tile3D {
             metalness: 0,
             map: getBlankGlyphTexture(),
         });
-        patchTileShader(topMat, this.shaderUniforms, { glyph: true, ramp: true });
+        patchTileShader(topMat, this.shaderUniforms, { glyph: true, ramp: true, topLift: false });
 
         // Bottom (-Y) face material: back-design texture set via
         // setBottomTexture. Coloured from the tileset's back colour.
@@ -676,7 +730,7 @@ export class Tile3D {
             emissive: c.backColor,
             emissiveIntensity: c.backEmissiveIntensity,
         });
-        patchTileShader(bottomMat, this.shaderUniforms, { glyph: false, ramp: true });
+        patchTileShader(bottomMat, this.shaderUniforms, { glyph: false, ramp: true, topLift: false });
 
         // [+X, -X, +Y, -Y, +Z, -Z]
         this.materials = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
@@ -784,6 +838,16 @@ export class Tile3D {
         if (opts.floor !== undefined) u.rampFloor.value = opts.floor;
         if (opts.range !== undefined) u.rampRange.value = opts.range;
         if (opts.shadowTint !== undefined) u.rampShadowTint.value.set(opts.shadowTint);
+    }
+
+    /**
+     * Live 朝上侧面提亮（立牌顶部窄条）。强度和目标色都是 uniform，
+     * 不用重建。
+     */
+    setSideTopLift(opts: { strength?: number; color?: THREE.ColorRepresentation }): void {
+        const u = this.shaderUniforms;
+        if (opts.strength !== undefined) u.sideTopLift.value = opts.strength;
+        if (opts.color !== undefined) u.sideTopLiftColor.value.set(opts.color);
     }
 
     /**
