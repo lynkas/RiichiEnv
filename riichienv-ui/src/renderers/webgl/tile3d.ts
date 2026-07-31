@@ -447,7 +447,7 @@ function patchTileShader(
 
                  float glyphAlpha = glyphTexel.a;
                  if ( sdfEnabled > 0.5 ) {
-                     float sd = texture2D( sdfMap, vMapUv ).r;
+                      float sd = textureLod( sdfMap, vMapUv, 0.0 ).r;
                      float aa = max( fwidth( sd ), 1e-5 );
                      // Shifting the threshold below 0.5 dilates the strokes.
                      float edge = 0.5 - glyphWeight;

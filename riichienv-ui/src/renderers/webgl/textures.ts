@@ -93,9 +93,9 @@ export class TileTextureFactory {
         const tex = new THREE.DataTexture(data, W, H, THREE.RedFormat, THREE.UnsignedByteType);
         tex.colorSpace = THREE.NoColorSpace;
         tex.flipY = true;
-        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.minFilter = THREE.LinearFilter;
         tex.magFilter = THREE.LinearFilter;
-        tex.generateMipmaps = true;
+        tex.generateMipmaps = false;
         tex.needsUpdate = true;
 
         this.sdfCache.set(tileCode, tex);
