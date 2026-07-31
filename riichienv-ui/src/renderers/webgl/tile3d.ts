@@ -660,6 +660,8 @@ export class Tile3D {
             roughness: c.faceRoughness,
             metalness: 0,
             map: getBlankGlyphTexture(),
+            emissive: c.bgColor,
+            emissiveIntensity: c.faceEmissiveIntensity,
         });
         patchTileShader(topMat, this.shaderUniforms, { glyph: true, ramp: true });
 

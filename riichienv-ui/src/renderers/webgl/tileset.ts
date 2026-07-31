@@ -111,6 +111,13 @@ export interface TileSetConfig {
     /** Face lacquer roughness. Tight enough that the hardened highlight is a compact shape. Default 0.3. */
     faceRoughness: number;
     /**
+     * Self-illumination on the +Y glyph face. Zero overhead: just a uniform in the
+     * existing shader. Kept low (default 0.08) so it is invisible on flat tiles lit
+     * by the overhead key but lifts standing tiles whose faces face purely horizontal
+     * and get near-zero N·L from the directional lights.
+     */
+    faceEmissiveIntensity: number;
+    /**
      * Take the glyph's *shape* from a signed distance field instead of from the
      * colour texture's alpha channel. Default **false**.
      *
@@ -355,6 +362,7 @@ const DEFAULT_CONFIG: TileSetConfig = {
         '9p': 0.018,
     },
     faceRoughness: 0.45,
+    faceEmissiveIntensity: 0.08,
     useSdfGlyph: true,
 
     backColor: 0xc8a030,
