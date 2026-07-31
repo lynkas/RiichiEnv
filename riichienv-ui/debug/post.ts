@@ -276,10 +276,11 @@ export function createPostChain(
 ): PostChain {
     const size = renderer.getSize(new THREE.Vector2());
     const pixelRatio = renderer.getPixelRatio();
+    const internalRatio = Math.max(pixelRatio, 1.5);
 
     const target = new THREE.WebGLRenderTarget(
-        size.x * pixelRatio,
-        size.y * pixelRatio,
+        size.x * internalRatio,
+        size.y * internalRatio,
         {
             type: THREE.HalfFloatType,
             colorSpace: THREE.LinearSRGBColorSpace,
@@ -287,7 +288,7 @@ export function createPostChain(
     );
 
     const composer = new EffectComposer(renderer, target);
-    composer.setPixelRatio(pixelRatio);
+    composer.setPixelRatio(internalRatio);
     composer.setSize(size.x, size.y);
 
     composer.addPass(new RenderPass(scene, camera));
@@ -337,11 +338,8 @@ export function createPostChain(
         gradePass,
         smaaPass,
         setSize(width, height) {
-            composer.setPixelRatio(renderer.getPixelRatio());
-            // No explicit bloomPass.setSize: EffectComposer.setSize already calls
-            // setSize on every pass, and it passes *device* pixels
-            // (width * pixelRatio). Calling it again here with CSS pixels left the
-            // bloom pyramid at half resolution on a 2x display after any resize.
+            const ratio = Math.max(renderer.getPixelRatio(), 1.5);
+            composer.setPixelRatio(ratio);
             composer.setSize(width, height);
         },
         apply,

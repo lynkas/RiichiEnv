@@ -56,6 +56,8 @@ const DEFAULTS = {
     mainLightColor: '#fff8f0', // key light：只留一点暖，避免整体发黄
     fillLight: 0.5,
     fillLightColor: '#7fa6e8', // 冷色补光（对侧，制造冷暗部）
+    rimLight: 0.5, // 第三盏灯：低仰角照亮西/北立牌顶面（key+fill 都照不到的水平方向）
+    rimLightColor: '#ffe8d0', // 暖色，接近 key light，避免立牌面偏冷
     hemiIntensity: 0.4,
     hemiSkyColor: '#dde3ee', // 天光：收掉一些蓝，避免把中性牌面染冷
     hemiGroundColor: '#4a3a2c', // 桌面暖反弹
@@ -460,6 +462,11 @@ fillLight.position.set(-380, 240, -320);
 fillLight.castShadow = false;
 scene.add(fillLight);
 
+const rimLight = new THREE.DirectionalLight(lp.rimLightColor, lp.rimLight);
+rimLight.position.set(-420, 100, -500);
+rimLight.castShadow = false;
+scene.add(rimLight);
+
 const ambient = new THREE.AmbientLight(0xa4aab6, lp.ambient);
 scene.add(ambient);
 
@@ -548,6 +555,8 @@ function applyVisuals(): void {
     dirLight.color.set(lp.mainLightColor);
     fillLight.intensity = lp.fillLight;
     fillLight.color.set(lp.fillLightColor);
+    rimLight.intensity = lp.rimLight;
+    rimLight.color.set(lp.rimLightColor);
     hemiLight.intensity = lp.hemiIntensity;
     hemiLight.color.set(lp.hemiSkyColor);
     hemiLight.groundColor.set(lp.hemiGroundColor);
@@ -1683,6 +1692,8 @@ visualFolder.add(lp, 'mainLight', 0, 6, 0.01).name('主光源 (暖)').onChange(a
 visualFolder.addColor(lp, 'mainLightColor').name('主光颜色').onChange(applyVisuals);
 visualFolder.add(lp, 'fillLight', 0, 3, 0.01).name('补光 (冷)').onChange(applyVisuals);
 visualFolder.addColor(lp, 'fillLightColor').name('补光颜色').onChange(applyVisuals);
+visualFolder.add(lp, 'rimLight', 0, 3, 0.01).name('侧补光 (暖)').onChange(applyVisuals);
+visualFolder.addColor(lp, 'rimLightColor').name('侧补光颜色').onChange(applyVisuals);
 visualFolder.add(lp, 'ambient', 0, 5, 0.01).name('环境光').onChange(applyVisuals);
 visualFolder.add(lp, 'handLightBoost', 0.5, 2, 0.01).name('手牌亮度倍率').onChange(applyVisuals);
 visualFolder.addColor(lp, 'tableColor').name('桌布颜色').onChange(applyVisuals);
