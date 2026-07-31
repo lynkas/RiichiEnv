@@ -171,25 +171,27 @@ export interface TileSetConfig {
     /** Height (mm) of the coloured bottom band on the sides. Default 3. */
     sideBottomHeight: number;
     /**
-     * How far a side fragment whose *world* normal points up is lifted toward
-     * `sideTopLiftColor`, 0..1. Default 0.9.
+     * How far a side fragment whose *world* normal points up is brightened by
+     * `sideTopLiftFactor`, 0..1. Default 0.9.
      *
      * The deliberate "sides darker than the face" design assumes the sides are
      * vertical (see `sideTopColor`). A standing hand tile breaks that
      * assumption: its top narrow strip is a side face rotated horizontal, so it
      * receives the same overhead key as the glyph faces yet keeps the dimmer
-     * side albedo. Lifting the albedo where the world normal is up
+     * side albedo. Multiplying the albedo up where the world normal is up
      * (smoothstep 0.5→0.9) restores what the surface would look like had it
-     * been authored as a top face. Vertical sides (flat tiles, wall, river)
-     * sit at normal.y = 0 and are completely untouched.
+     * been authored as a top face — while keeping the cream→gold gradient and
+     * gold band visible in proportion. Vertical sides (flat tiles, wall,
+     * river) sit at normal.y = 0 and are completely untouched.
      */
     sideTopLift: number;
     /**
-     * Target colour of the upward-side lift, in any form `THREE.Color` accepts.
-     * Default 0xe4e4e1 — same as `bgColor`, because a physically horizontal
-     * strip of lacquer should read exactly like the face.
+     * Multiplicative brightening factor for upward-facing side fragments.
+     * Default 1.43 — the linear-space ratio of `bgColor` (#e4e4e1) over
+     * `sideTopColor` (#c2c1bc), so the horizontal lacquer strip ends up as
+     * bright as the face without flattening the side gradient to one colour.
      */
-    sideTopLiftColor: number | string;
+    sideTopLiftFactor: number;
 
     // --- Hard-edged specular ---
     /**
@@ -384,7 +386,7 @@ const DEFAULT_CONFIG: TileSetConfig = {
     sideBottomColor: '#c8a030',
     sideBottomHeight: 6,
     sideTopLift: 0.9,
-    sideTopLiftColor: 0xe4e4e1,
+    sideTopLiftFactor: 1.43,
 
     specHard: true,
     specThreshold: 0.0065,

@@ -339,10 +339,10 @@ interface TileShaderUniforms {
     specEnvScale: { value: number };
     /** How strongly specular and rim are held off the glyph ink, 0..1. */
     inkSpecSuppress: { value: number };
-    /** 0..1 lift of upward-facing side fragments toward `sideTopLiftColor`. */
+    /** 0..1 lift of upward-facing side fragments toward `sideTopLiftFactor`. */
     sideTopLift: { value: number };
-    /** Albedo target of the upward-side lift (side material only). */
-    sideTopLiftColor: { value: THREE.Color };
+    /** Multiplicative albedo factor of the upward-side lift (side material only). */
+    sideTopLiftFactor: { value: number };
 }
 
 /**
@@ -386,7 +386,7 @@ function patchTileShader(
         shader.uniforms.specEnvScale = uniforms.specEnvScale;
         shader.uniforms.inkSpecSuppress = uniforms.inkSpecSuppress;
         shader.uniforms.sideTopLift = uniforms.sideTopLift;
-        shader.uniforms.sideTopLiftColor = uniforms.sideTopLiftColor;
+        shader.uniforms.sideTopLiftFactor = uniforms.sideTopLiftFactor;
 
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <common>',
@@ -483,7 +483,9 @@ function patchTileShader(
             // 设计假设侧面是竖直面。立牌 rotation.x = π/2 之后，牌盒的一条
             // 窄侧面转成水平朝天，吃着和牌面一样的顶光却仍用暗 albedo，读作
             // 一条脏边。物理上这条水平的漆面就该和牌面一样亮，所以把世界
-            // 法线朝上的片元 albedo lerp 向牌面底色。
+            // 法线朝上的片元 albedo 乘上一个倍率（≈ 牌面色/侧面色 的线性比）。
+            // 乘法而不是 lerp 到纯色：侧面的 cream→gold 渐变和金色带按原
+            // 比例变亮，不会被抹平。
             //
             // vNormal 是 view space，绕不开相机；世界法线在顶点着色器里用
             // modelMatrix 变换（与描边材质的 worldNormal 同一写法），随
@@ -510,7 +512,7 @@ function patchTileShader(
                     '#include <common>',
                     `#include <common>
                      uniform float sideTopLift;
-                     uniform vec3 sideTopLiftColor;
+                     uniform float sideTopLiftFactor;
                      varying vec3 vWorldNormal;`,
                 )
                 .replace(
@@ -518,7 +520,7 @@ function patchTileShader(
                     `#include <map_fragment>
                      float topLiftT = smoothstep( 0.5, 0.9, normalize( vWorldNormal ).y )
                          * sideTopLift;
-                     diffuseColor.rgb = mix( diffuseColor.rgb, sideTopLiftColor, topLiftT );`,
+                     diffuseColor.rgb *= mix( vec3( 1.0 ), vec3( sideTopLiftFactor ), topLiftT );`,
                 );
         }
 
@@ -697,7 +699,7 @@ export class Tile3D {
             specEnvScale: { value: c.specEnvScale },
             inkSpecSuppress: { value: c.inkSpecSuppress },
             sideTopLift: { value: c.sideTopLift },
-            sideTopLiftColor: { value: new THREE.Color(c.sideTopLiftColor) },
+            sideTopLiftFactor: { value: c.sideTopLiftFactor },
         };
 
         // Side material: cream base, replaced by a cream→gold gradient `map`
@@ -841,13 +843,13 @@ export class Tile3D {
     }
 
     /**
-     * Live 朝上侧面提亮（立牌顶部窄条）。强度和目标色都是 uniform，
+     * Live 朝上侧面提亮（立牌顶部窄条）。强度和倍率都是 uniform，
      * 不用重建。
      */
-    setSideTopLift(opts: { strength?: number; color?: THREE.ColorRepresentation }): void {
+    setSideTopLift(opts: { strength?: number; factor?: number }): void {
         const u = this.shaderUniforms;
         if (opts.strength !== undefined) u.sideTopLift.value = opts.strength;
-        if (opts.color !== undefined) u.sideTopLiftColor.value.set(opts.color);
+        if (opts.factor !== undefined) u.sideTopLiftFactor.value = opts.factor;
     }
 
     /**
