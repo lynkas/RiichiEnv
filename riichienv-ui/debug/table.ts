@@ -85,7 +85,6 @@ const DEFAULTS = {
     glyphWeight: 0.01,
     glyphWeightScale: 1, // 乘在解析出的粗细上，用来整体缩放而不打乱三档比例
     faceRoughness: 0.45, // 牌面粗糙度：调高一点，收窄高光区域、压掉牌面反光感
-    faceEmissiveIntensity: 0.08, // 牌面自发光：平牌有主灯不显，立牌顶面水平朝向能救暗面
     useSdfGlyph: true, // 480×640 的场。桌面尺寸下贴图 mipmap 会把细笔画平均掉，字面发淡
     // --- 硬边高光 ---
     // 长方体上每个面 N·L 恒定、diffuse 本来就是平的，所以 ramp 没什么梯度可切；
@@ -776,7 +775,6 @@ function tileSetFor(width: number, height: number, depth: number, scale: number)
         bgColor: lp.tileBgColor,
         saturation: lp.tileSaturation,
         faceRoughness: lp.faceRoughness,
-        faceEmissiveIntensity: lp.faceEmissiveIntensity,
         sideTopColor: lp.sideTopColor,
         sideBottomColor: lp.sideBottomColor,
         sideBottomHeight: lp.sideBottomHeight,
@@ -1860,11 +1858,6 @@ materialFolder.addColor(lp, 'rimColor').name('Rim颜色 ⚡').onChange((v: strin
 materialFolder.add(lp, 'faceRoughness', 0, 1, 0.01).name('牌面粗糙度 ⚡').onChange((v: number) => {
     forEachTile((t) => {
         (t.materials[2] as THREE.MeshStandardMaterial).roughness = v;
-    });
-});
-materialFolder.add(lp, 'faceEmissiveIntensity', 0, 0.3, 0.005).name('牌面自发光 ⚡').onChange((v: number) => {
-    forEachTile((t) => {
-        (t.materials[2] as THREE.MeshStandardMaterial).emissiveIntensity = v;
     });
 });
 materialFolder
