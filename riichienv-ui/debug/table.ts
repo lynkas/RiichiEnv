@@ -463,7 +463,7 @@ fillLight.castShadow = false;
 scene.add(fillLight);
 
 const rimLight = new THREE.DirectionalLight(lp.rimLightColor, lp.rimLight);
-rimLight.position.set(-420, 100, -500);
+rimLight.position.set(400, 100, -300);
 rimLight.castShadow = false;
 scene.add(rimLight);
 
