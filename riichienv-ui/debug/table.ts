@@ -1556,6 +1556,10 @@ controls.target.set(0, lp.cameraTargetY, lp.cameraTargetZ);
 controls.minAzimuthAngle = 0;
 controls.maxAzimuthAngle = 0;
 controls.enableDamping = true;
+// 基准阻尼（按 60fps 手感调）；实际每帧在 animate() 里按真实 dt 换算，
+// 否则 OrbitControls 每帧固定乘 (1-dampingFactor)，掉帧时惯性感变大。
+const BASE_DAMPING = 0.05;
+controls.dampingFactor = BASE_DAMPING;
 controls.maxPolarAngle = Math.PI / 2 - 0.05;
 controls.minDistance = 200;
 controls.maxDistance = 3000;
@@ -2057,8 +2061,15 @@ window.addEventListener('resize', () => {
 // 主场景 + overlay 手牌都交给 EffectComposer（两个 RenderPass，第二个
 // clear=false / clearDepth=true），所以不再需要手动 autoClear 双渲染。
 // 关掉 post 时退回直接渲染，用于对比。
+let lastFrameTime = 0; // performance.now()；0 = 首帧，dt 无效用基准阻尼
 function animate(): void {
     requestAnimationFrame(animate);
+    // 帧率无关阻尼：把 60fps 下的 BASE_DAMPING 换算成本帧 dt 的等效值。
+    // clamp dt 防止掉帧（如切后台回来）时阻尼跳变。
+    const now = performance.now();
+    const dt = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, 0.1) : 1 / 60;
+    lastFrameTime = now;
+    controls.dampingFactor = 1 - Math.pow(1 - BASE_DAMPING, dt * 60);
     controls.update();
 
     if (contactShadowsDirty) {
