@@ -14,6 +14,9 @@ from riichienv_ml.trainers.grp import Trainer
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Global Reward Predictor")
     parser.add_argument("-c", "--config", type=str, required=True, help="Path to config YAML")
+    parser.add_argument("--data_glob", type=str, default=None)
+    parser.add_argument("--val_data_glob", type=str, default=None)
+    parser.add_argument("--replay_rule", type=str, default=None)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=None)
@@ -29,6 +32,12 @@ def main():
 
     # Override config with CLI args
     overrides = {}
+    if args.data_glob is not None:
+        overrides["data_glob"] = args.data_glob
+    if args.val_data_glob is not None:
+        overrides["val_data_glob"] = args.val_data_glob
+    if args.replay_rule is not None:
+        overrides["game"] = cfg.game.model_copy(update={"replay_rule": args.replay_rule})
     if args.device is not None:
         overrides["device"] = args.device
     if args.batch_size is not None:
