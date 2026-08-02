@@ -3,11 +3,16 @@
 Supports standard BC (bc_logs) and ActorCriticNetwork BC (bc_model) via config.
 Auto-detects mode from config's `online` flag.
 
+DDP: either launch via torchrun (env LOCAL_RANK/RANK/WORLD_SIZE are picked up
+automatically) or pass ``--world_size N`` to have the script spawn N ranks.
+
 Usage:
     uv run python scripts/train_bc.py -c src/riichienv_ml/configs/4p/bc_logs.yml
-    uv run python scripts/train_bc.py -c src/riichienv_ml/configs/4p/bc_model.yml
+    torchrun --nproc_per_node=2 scripts/train_bc.py -c src/riichienv_ml/configs/4p/bc_logs.yml
+    uv run python scripts/train_bc.py -c src/riichienv_ml/configs/4p/bc_logs.yml --world_size 2
 """
 import argparse
+import os
 from pathlib import Path
 
 import torch.multiprocessing
@@ -36,11 +41,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_blocks", type=int, default=None)
     parser.add_argument("--conv_channels", type=int, default=None)
     parser.add_argument("--fc_dim", type=int, default=None)
+    parser.add_argument("--world_size", type=int, default=1,
+                        help="Number of DDP ranks (ignored when launched via torchrun)")
+    parser.add_argument("--master_port", type=str, default="29500",
+                        help="TCP port for the DDP rendezvous (mp.spawn mode only)")
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
+def _init_process_group() -> int:
+    """Initialize torch.distributed from torchrun env vars.
+
+    Returns the local rank (used to select the CUDA device).
+    """
+    import torch.distributed as dist
+
+    world_size = int(os.environ["WORLD_SIZE"])
+    rank = int(os.environ["RANK"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    dist.init_process_group(
+        "nccl",
+        init_method="env://",
+        world_size=world_size,
+        rank=rank,
+    )
+    return local_rank
+
+
+def run_training(args: argparse.Namespace, local_rank: int, ddp: bool) -> None:
+    import torch.distributed as dist
+
     cfg = load_config(args.config).bc
 
     # Override config with CLI args
@@ -62,13 +91,16 @@ def main():
         cfg = cfg.model_copy(update={"model": cfg.model.model_copy(update=model_overrides)})
 
     log_dir = str(Path(cfg.output).parent)
-    setup_logging(log_dir, "train_bc")
-    init_wandb(cfg, config_path=args.config)
+    if not ddp or local_rank == 0:
+        setup_logging(log_dir, "train_bc")
+        init_wandb(cfg, config_path=args.config)
 
     game = cfg.game
 
     # Online teacher BC vs offline logs BC
     if cfg.online:
+        if ddp:
+            raise NotImplementedError("Online teacher BC does not support DDP yet")
         from riichienv_ml.trainers.bc_model import BCModelTrainer
         trainer = BCModelTrainer(
             grp_model_path=cfg.grp_model,
@@ -124,10 +156,54 @@ def main():
         replay_rule=game.replay_rule,
         tile_dim=game.tile_dim,
         evaluator_config=cfg.evaluator,
+        ddp=ddp,
+        local_rank=local_rank,
     )
     trainer.train(cfg.output)
 
 
+def main():
+    args = parse_args()
+
+    # torchrun launches the ranks for us.
+    if "LOCAL_RANK" in os.environ:
+        local_rank = _init_process_group()
+        try:
+            run_training(args, local_rank, ddp=True)
+        finally:
+            import torch.distributed as dist
+            dist.destroy_process_group()
+        return
+
+    # --world_size N: spawn N ranks from a single process.
+    if args.world_size > 1:
+        torch.multiprocessing.spawn(
+            _mp_worker,
+            args=(args,),
+            nprocs=args.world_size,
+            join=True,
+        )
+        return
+
+    run_training(args, local_rank=0, ddp=False)
+
+
+def _mp_worker(local_rank: int, args: argparse.Namespace) -> None:
+    import torch.distributed as dist
+
+    dist.init_process_group(
+        "nccl",
+        init_method=f"tcp://127.0.0.1:{args.master_port}",
+        world_size=args.world_size,
+        rank=local_rank,
+    )
+    try:
+        run_training(args, local_rank=local_rank, ddp=True)
+    finally:
+        dist.destroy_process_group()
+
+
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn', force=True)
-    main()
+    if torch.multiprocessing.current_process().name == "MainProcess":
+        main()

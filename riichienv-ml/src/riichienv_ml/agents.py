@@ -73,7 +73,12 @@ class Agent:
 
         # Build encoder
         EncoderClass = import_class(sub_cfg.encoder_class)
-        self.encoder = EncoderClass(tile_dim=game.tile_dim)
+        encoder_kwargs = {"tile_dim": game.tile_dim}
+        model_params = sub_cfg.model.model_dump()
+        for key in ("max_prog_len", "max_cand_len"):
+            if key in model_params:
+                encoder_kwargs[key] = model_params[key]
+        self.encoder = EncoderClass(**encoder_kwargs)
 
     # ------------------------------------------------------------------
     # Config helpers

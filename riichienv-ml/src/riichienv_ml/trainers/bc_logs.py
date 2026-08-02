@@ -92,12 +92,18 @@ class Trainer:
         replay_rule: str = "mjsoul",
         tile_dim: int = 34,
         evaluator_config=None,
+        ddp: bool = False,
+        local_rank: int = 0,
     ):
         self.grp_model_path = grp_model_path
         self.pts_weight = pts_weight
         self.data_glob = data_glob
         self.device_str = device_str
-        self.device = torch.device(device_str)
+        self.device = torch.device(f"cuda:{local_rank}") if ddp else torch.device(device_str)
+        self.ddp = ddp
+        self.local_rank = local_rank
+        self.world_size = int(os.environ["WORLD_SIZE"]) if ddp else 1
+        self._is_main = not ddp or local_rank == 0
         self.gamma = gamma
         self.batch_size = batch_size
         self.lr = lr
@@ -143,18 +149,31 @@ class Trainer:
         reward_predictor = RewardPredictor(
             self.grp_model_path, self.pts_weight,
             n_players=self.n_players, input_dim=input_dim,
-            device=self.device_str,
+            device=str(self.device),
         )
 
         # Instantiate encoder
         EncoderClass = import_class(self.encoder_class)
-        encoder = EncoderClass(tile_dim=self.tile_dim)
+        encoder_kwargs = {"tile_dim": self.tile_dim}
+        for key in ("max_prog_len", "max_cand_len"):
+            if self.model_config.get(key) is not None:
+                encoder_kwargs[key] = self.model_config[key]
+        encoder = EncoderClass(**encoder_kwargs)
 
         # Dataset
-        data_files = glob.glob(self.data_glob, recursive=True)
+        if self.data_glob.endswith(".txt"):
+            with open(self.data_glob) as f:
+                data_files = f.read().splitlines()
+        else:
+            data_files = glob.glob(self.data_glob, recursive=True)
         assert data_files, f"No data found at {self.data_glob}"
 
-        print(f"Found {len(data_files)} data files.")
+        # Shard files across DDP ranks so each rank consumes distinct replays.
+        if self.ddp:
+            data_files = data_files[self.local_rank::self.world_size]
+
+        if self._is_main:
+            print(f"Rank {self.local_rank}: Found {len(data_files)} data files.")
 
         DatasetClass = import_class(self.dataset_class)
         dataset = DatasetClass(
@@ -175,6 +194,12 @@ class Trainer:
         model = ModelClass(**self.model_config).to(self.device)
         has_aux = hasattr(model, 'aux_head') and model.aux_head is not None
 
+        if self.ddp:
+            import torch.distributed as dist
+            dist.barrier()
+            model = torch.nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.local_rank], output_device=self.local_rank)
+
         optimizer = optim.AdamW(model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         scheduler = CosineAnnealingLR(optimizer, T_max=self.limit, eta_min=1e-7)
         mse_criterion = nn.MSELoss()
@@ -187,6 +212,12 @@ class Trainer:
         cql_meter = AverageMeter(name="cql")
         mse_meter = AverageMeter(name="mse")
         aux_meter = AverageMeter(name="aux")
+
+        def model_sd() -> dict:
+            return model.module.state_dict() if self.ddp else model.state_dict()
+
+        def save_ckpt(path: str) -> None:
+            torch.save(model_sd(), path)
 
         for epoch in range(self.num_epochs):
             for i, batch in enumerate(dataloader):
@@ -238,7 +269,7 @@ class Trainer:
                 mse_meter.update(mse_term.item())
                 aux_meter.update(aux_loss_val)
 
-                if step % 100 == 0:
+                if step % 100 == 0 and self._is_main:
                     log_msg = (f"Epoch {epoch}, Step {step}, Loss: {loss_meter.avg:.4f} "
                                f"(MSE: {mse_meter.avg:.4f}, CQL: {cql_meter.avg:.4f}")
                     log_dict = {
@@ -255,15 +286,15 @@ class Trainer:
                     wandb.log(log_dict, step=step)
 
                 # Periodic Mortal evaluation
-                if (self.tp_evaluator is not None
+                if (self.tp_evaluator is not None and self._is_main
                         and step > 0
                         and step % self.evaluator_config.eval_interval == 0):
                     try:
                         ckpt_path = output_path.replace(".pth", f"_step{step}.pth")
-                        torch.save(model.state_dict(), ckpt_path)
+                        save_ckpt(ckpt_path)
                         logger.info(f"Saved checkpoint to {ckpt_path}")
 
-                        hw = {k: v.cpu() for k, v in model.state_dict().items()}
+                        hw = {k: v.cpu() for k, v in model_sd().items()}
                         model.eval()
                         metrics = self.tp_evaluator.evaluate(
                             hw, num_episodes=self.evaluator_config.eval_episodes)
@@ -279,20 +310,21 @@ class Trainer:
                 if step >= self.limit:
                     break
 
-            loss_meter.reset()
-            cql_meter.reset()
-            mse_meter.reset()
-            aux_meter.reset()
+            if self._is_main:
+                loss_meter.reset()
+                cql_meter.reset()
+                mse_meter.reset()
+                aux_meter.reset()
 
-            torch.save(model.state_dict(), output_path)
-            print(f"Saved model to {output_path}")
+                save_ckpt(output_path)
+                print(f"Saved model to {output_path}")
             if step >= self.limit:
                 break
 
         # Final Mortal evaluation
-        if self.tp_evaluator is not None:
+        if self.tp_evaluator is not None and self._is_main:
             try:
-                hw = {k: v.cpu() for k, v in model.state_dict().items()}
+                hw = {k: v.cpu() for k, v in model_sd().items()}
                 model.eval()
                 metrics = self.tp_evaluator.evaluate(
                     hw, num_episodes=self.evaluator_config.eval_episodes)
@@ -302,4 +334,5 @@ class Trainer:
             except Exception as e:
                 logger.error(f"Final Mortal evaluation failed: {e}")
 
-        wandb.finish()
+        if self._is_main:
+            wandb.finish()

@@ -1,6 +1,7 @@
 bc:
   game:
     n_players: 4
+    replay_rule: tenhou
   data_glob: "/data/mjsoul/mjsoul-4p/**/*.jsonl.gz"
   grp_model: /data/workspace/riichienv-ml/4p/grp_model.pth
   output: /data/workspace/riichienv-ml/4p/bc_logs.pth

@@ -4,7 +4,7 @@ import importlib
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, model_validator
 
 
 GAME_PARAMS = {
@@ -37,6 +37,14 @@ def import_class(dotted_path: str):
 
 class GameConfig(BaseModel):
     n_players: Literal[3, 4] = 4
+    # None -> per-player default from GAME_PARAMS (mjsoul); override via YAML
+    replay_rule: str | None = None
+
+    @model_validator(mode="after")
+    def _fill_default_replay_rule(self):
+        if self.replay_rule is None:
+            self.replay_rule = GAME_PARAMS[self.n_players]["replay_rule"]
+        return self
 
     @computed_field
     @property
@@ -52,11 +60,6 @@ class GameConfig(BaseModel):
     @property
     def game_mode(self) -> str:
         return GAME_PARAMS[self.n_players]["game_mode"]
-
-    @computed_field
-    @property
-    def replay_rule(self) -> str:
-        return GAME_PARAMS[self.n_players]["replay_rule"]
 
     @computed_field
     @property

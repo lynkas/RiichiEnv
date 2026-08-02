@@ -26,11 +26,13 @@ class QNetwork(nn.Module):
 
     def _compute_q(self, v: torch.Tensor, a: torch.Tensor,
                    mask: torch.Tensor | None = None) -> torch.Tensor:
-        """Dueling DQN: q = v + a - mean(a).
+        """Dueling aggregation: q = v + a - mean(a).
 
-        When mask is provided (online DQN), mean is computed only over legal
-        actions (Mortal-style). Without mask (offline CQL), uses the full mean
-        for backward compatibility.
+        When a legal-action mask is provided (online DQN), the advantage
+        baseline is computed only over legal actions, so illegal entries do
+        not drag the mean; the corresponding Q-values are then masked to
+        -inf.  Without a mask (offline CQL), the full mean over all actions
+        is used.
         """
         if mask is not None:
             mask_bool = mask.bool() if mask.dtype != torch.bool else mask

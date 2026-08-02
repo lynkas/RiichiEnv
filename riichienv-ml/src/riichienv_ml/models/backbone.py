@@ -3,22 +3,43 @@ import torch.nn as nn
 
 
 class ChannelAttention(nn.Module):
-    def __init__(self, channels, ratio=16):
-        super().__init__()
-        self.shared_mlp = nn.Sequential(
-            nn.Linear(channels, channels // ratio, bias=True),
-            nn.ReLU(inplace=True),
-            nn.Linear(channels // ratio, channels, bias=True),
-        )
-        for mod in self.modules():
-            if isinstance(mod, nn.Linear):
-                nn.init.constant_(mod.bias, 0)
+    """Self-designed channel gating for the residual CNN blocks.
 
-    def forward(self, x):
-        avg_out = self.shared_mlp(x.mean(-1))
-        max_out = self.shared_mlp(x.amax(-1))
-        weight = (avg_out + max_out).sigmoid()
-        return weight.unsqueeze(-1) * x
+    Design: Channel Contrast Gating (CCG).
+
+    Each channel's activation profile over the tile dimension is summarized
+    by two complementary statistics:
+
+      * ``mean`` -- the DC level: how strongly the channel responds on
+        average across all tile positions;
+      * ``contrast = max - min`` -- the activation spread: how much the
+        channel discriminates between tile positions.
+
+    ``mean`` is projected by a single linear map to a gate in (0, 1) via
+    sigmoid; ``contrast`` is projected by an independent linear map to a
+    modulation in (-1, 1) via tanh.  The per-channel scale is
+    ``gate * (1 + 0.5 * modulation)``, so a channel whose activations are
+    flat (low contrast) is suppressed while a "peaky" channel is boosted
+    beyond its average-level gate.
+
+    Rationale vs. classic squeeze-and-excitation gating: there is no
+    bottleneck shared-MLP and no max-pooling; each statistic feeds its own
+    tiny linear gate, keeping the module low-capacity (4 parameters) and the
+    two gating signals independently interpretable.
+    """
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.gate_proj = nn.Linear(1, 1)    # mean     -> (0, 1)   gate
+        self.mod_proj = nn.Linear(1, 1)     # contrast -> (-1, 1)  modulation
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        mean = x.mean(dim=-1, keepdim=True)                        # (B, C, 1)
+        contrast = (x.amax(dim=-1) - x.amin(dim=-1)).unsqueeze(-1)  # (B, C, 1)
+        gate = self.gate_proj(mean).sigmoid()
+        modulation = self.mod_proj(contrast).tanh()
+        scale = gate * (1.0 + 0.5 * modulation)                    # (B, C, 1)
+        return x * scale
 
 
 class ResBlock(nn.Module):
